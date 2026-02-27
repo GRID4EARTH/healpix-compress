@@ -2,7 +2,10 @@
 name = "healpix-chunk-compression"
 requires-python = ">= 3.13"
 license = { text = "Apache-2.0" }
-dependencies = []
+dependencies = [
+  "numpy>=2",
+  "scipy",
+]
 dynamic = ["version"]
 
 [build-system]
