@@ -1,0 +1,8 @@
+name: healpix-chunk-compression-docs
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - sphinx>=4
+  - pydata-sphinx-theme
+  - ipython
