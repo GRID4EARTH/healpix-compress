@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.fft import dctn
+from scipy.fft import dctn, idctn
 
 
 @dataclass
@@ -104,5 +104,39 @@ def _compress_residuals_dct(
     )
 
 
-def decompress(compressed: CompressedChunk, delta: int) -> np.ndarray:
-    pass
+def _decompress_residuals_dct(
+    compressed_residuals: CompressedResiduals,
+    shape: tuple[int, int],
+    residuals_dtype: np.DTypeLike,
+    top_k: int,
+):
+    quantization = compressed_residuals.quantization
+    scale = compressed_residuals.scale
+    coefficient_positions = compressed_residuals.coefficient_positions
+
+    kept_coefficients = (quantization / np.iinfo(quantization.dtype).max) * scale
+
+    coefficients = np.zeros(shape, dtype=kept_coefficients.dtype)
+    coefficients[coefficient_positions] = kept_coefficients
+
+    tile = idctn(coefficients, shape, norm="ortho")
+    return _flatten_tile(tile)
+
+
+def decompress(compressed: CompressedChunk, delta: int, top_k: int) -> np.ndarray:
+    delta_mean = int(np.log(compressed.mean.shape[0]) / np.log(4))
+    delta_residuals = delta_mean + delta
+
+    shape = (2**delta_residuals, 2**delta_residuals)
+
+    residuals = _decompress_residuals_dct(
+        compressed.residuals,
+        shape=shape,
+        residuals_dtype=compressed.mean.dtype,
+        top_k=top_k,
+    )
+
+    reconstructed = compressed.mean[:, None, ...] + residuals
+
+    resulting_shape = (*compressed.mean.shape[1:], -1)
+    return np.reshape(reconstructed, resulting_shape)
