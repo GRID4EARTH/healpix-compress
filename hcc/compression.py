@@ -54,10 +54,10 @@ def compress(
     quantization_dtype: np.DTypeLike = "int16",
     scale_dtype: np.DTypeLike = "float32",
 ) -> CompressedChunk:
-    reduction_shape = (-1, 4**delta, *chunk.shape[1:])
+    reduction_shape = (*chunk.shape[:-1], -1, 4**delta)
 
     reshaped = np.reshape(chunk, reduction_shape)
-    mean = np.mean(reshaped, axis=1, keepdims=True)
+    mean = np.mean(reshaped, axis=-1, keepdims=True)
 
     residuals = np.reshape(reshaped - mean, chunk.shape)
     compressed_residuals = _compress_residuals_dct(
