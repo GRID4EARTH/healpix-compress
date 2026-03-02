@@ -8,6 +8,7 @@ from scipy.fft import dctn
 class CompressedResiduals:
     quantization: np.ndarray
     scale: np.ndarray
+    coefficent_positions: np.ndarray
 
 
 @dataclass
@@ -99,6 +100,7 @@ def _compress_residuals_dct(
     return CompressedResiduals(
         quantization=np.astype(quantization, quantization_dtype),
         scale=np.astype(scale, scale_dtype),
+        coefficient_positions=to_keep,
     )
 
 
