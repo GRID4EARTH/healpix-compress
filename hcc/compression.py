@@ -79,7 +79,8 @@ def _compress_residuals_dct(
     if residuals.ndim != 1:
         raise ValueError("residuals compression only works for 1D arrays")
 
-    coefficients = np.reshape(dctn(residuals, norm="ortho"), (-1,))
+    expanded_residuals = _expand_tile(residuals)
+    coefficients = np.reshape(dctn(expanded_residuals, norm="ortho"), (-1,))
 
     # keep the top_k largest magnitude coefficients
     to_keep = np.argsort(np.abs(coefficients), descending=True)[:top_k]
