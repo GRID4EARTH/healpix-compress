@@ -16,6 +16,37 @@ class CompressedChunk:
     residuals: CompressedResiduals
 
 
+def _decode_zorder(delta: int):
+    size = 4**delta
+    x = np.zeros((size,), dtype="uint64")
+    y = np.zeros((size,), dtype="uint64")
+
+    code = np.arange(size, dtype="uint64")
+    for bit in range(delta):
+        x |= ((code >> (bit << 1)) & 1) << bit
+        y |= ((code >> (bit << 1 + 1)) & 1) << bit
+
+    return x, y
+
+
+def _flatten_tile(data: np.ndarray):
+    delta = int(np.log(data.size) // np.log(4))
+    x, y = _decode_zorder(delta)
+
+    return delta[..., x, y]
+
+
+def _expand_tile(data: np.ndarray):
+    delta = int(np.log(data.size) // np.log(4))
+    x, y = _decode_zorder(delta)
+
+    # TODO: figure out how to invert x, y to become a 2D array of indexes into data
+    out = np.empty(data.size, dtype=data.dtype)
+    out[..., x, y] = data
+
+    return out
+
+
 def compress(
     chunk: np.ndarray,
     delta: int,
