@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Self
 
 import numpy as np
@@ -9,6 +9,7 @@ from zarr.buffer.cpu import numpy_buffer_prototype
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
+from zarr.dtype import UInt64, ZDType, parse_dtype
 from zarr.registry import register_codec
 
 from hcc import compression
@@ -21,8 +22,7 @@ class HccCodec(ArrayBytesCodec):
 
     quantization_dtype: np.typing.DTypeLike = "int16"
 
-    dtypes: list[np.typing.DTypeLike] = field(default_factory=list, init=False)
-    endianness: list[str] = field(default_factory=list, init=False)
+    dtypes: list[ZDType] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -34,9 +34,15 @@ class HccCodec(ArrayBytesCodec):
         return cls(**configuration_parsed)
 
     def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
-        print(array_spec)
-        raise ValueError(array_spec)
-        return self
+        value_dtype = array_spec.dtype
+        dtypes = [
+            value_dtype,
+            value_dtype,
+            parse_dtype(self.quantization_dtype, zarr_format=3),
+            UInt64(endianness="little"),
+        ]
+
+        return replace(self, dtypes=dtypes)
 
     def to_dict(self) -> dict[str, JSON]:
         return {
@@ -46,13 +52,15 @@ class HccCodec(ArrayBytesCodec):
             "quantization_dtype": self.quantization_dtype,
         }
 
-    async def _decode_single(self, chunk_data: Buffer) -> NDBuffer | None:
+    async def _decode_single(
+        self, chunk_data: Buffer, chunk_spec: ArraySpec
+    ) -> NDBuffer | None:
         # To decode, we need: dtypes, endianness, and shape (but all arrays are 1D, so shape is not needed)
         dtypes = self.dtypes
 
         n_footer_bytes = len(dtypes) * 8
         footer = chunk_data[-n_footer_bytes:]
-        lengths = footer.data.view(dtype="uint64")
+        lengths = footer.as_numpy_array().view(dtype="uint64")
         offsets = np.cumulative_sum(lengths, include_initial=True)
 
         slices = [
@@ -60,7 +68,7 @@ class HccCodec(ArrayBytesCodec):
         ]
 
         arrays = [
-            chunk_data[slice_].view(dtype=dtype)
+            chunk_data[slice_].as_numpy_array().view(dtype=dtype.to_native_dtype())
             for slice_, dtype in zip(slices, dtypes)
         ]
 
@@ -68,7 +76,9 @@ class HccCodec(ArrayBytesCodec):
 
         return compression.decompress(compressed, delta=self.delta, top_k=self.top_k)
 
-    async def _encode_single(self, chunk_array: NDBuffer) -> Buffer | None:
+    async def _encode_single(
+        self, chunk_array: NDBuffer, chunk_spec: ArraySpec
+    ) -> Buffer | None:
         # encoding scheme:
         # 1. extract arrays
         # 2. convert arrays to bytes (TODO: use codec pipeline)
@@ -76,12 +86,13 @@ class HccCodec(ArrayBytesCodec):
         # 4. convert byte length array to bytes
         # 5. concatenate
 
+        chunk = chunk_array.as_numpy_array()
         compressed = compression.compress(
-            chunk_array.data,
+            chunk,
             delta=self.delta,
             top_k=self.top_k,
             quantization_dtype=self.quantization_dtype,
-            scale_dtype=chunk_array.data.dtype,
+            scale_dtype=chunk.dtype,
         )
 
         arrays = compressed.extract_arrays()
@@ -91,13 +102,13 @@ class HccCodec(ArrayBytesCodec):
             prototype.buffer.from_array_like(array.ravel().view(dtype="B"))
             for array in arrays
         ]
-        lengths = [x.data.size for x in array_buffers]
+        lengths = [x.as_array_like().size for x in array_buffers]
         length_buffer = prototype.buffer.from_array_like(
             np.asarray(lengths, dtype="uint64").view(dtype="B")
         )
 
         return (
-            sum(array_buffers, initial=prototype.buffer.create_zero_length())
+            sum(array_buffers, start=prototype.buffer.create_zero_length())
             + length_buffer
         )
 
