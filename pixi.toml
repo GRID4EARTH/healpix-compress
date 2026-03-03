@@ -1,0 +1,31 @@
+[workspace]
+authors = ["Justus Magin <keewis@posteo.de>"]
+channels = ["conda-forge"]
+name = "healpix-chunk-compression"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+numpy = ">=2.4.2,<3"
+scipy = ">=1.17.1,<2"
+
+[pypi-dependencies]
+healpix-chunk-compression = { path = ".", editable = true }
+
+[feature.py313.dependencies]
+python = "3.13.*"
+
+[feature.dev.dependencies]
+ipython = "*"
+black = "*"
+ipdb = "*"
+pyinstrument = "*"
+
+[feature.tests.dependencies]
+pytest = "*"
+hypothesis = ">=6.151.9,<7"
+
+[environments]
+default = ["dev", "py313", "tests"]
