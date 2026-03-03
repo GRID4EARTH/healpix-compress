@@ -23,6 +23,12 @@ ipython = "*"
 black = "*"
 ipdb = "*"
 pyinstrument = "*"
+healpix-geo = ">=0.0.11,<0.0.12"
+jupyterlab = ">=4.5.5,<5"
+jupyter-resource-usage = ">=1.2.0,<2"
+jupyterlab_code_formatter = ">=3.0.3,<4"
+xdggs = ">=0.6.0,<0.7"
+xarray = ">=2026.2.0,<2027"
 
 [feature.tests.dependencies]
 pytest = "*"
