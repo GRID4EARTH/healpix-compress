@@ -8,11 +8,12 @@ from scipy.fft import dctn, idctn
 class CompressedResiduals:
     quantization: np.ndarray
     scale: np.ndarray
-    coefficent_positions: np.ndarray
+    coefficient_positions: np.ndarray
 
 
 @dataclass
 class CompressedChunk:
+    delta: int
     mean: np.ndarray
     residuals: CompressedResiduals
 
@@ -25,24 +26,28 @@ def _decode_zorder(delta: int):
     code = np.arange(size, dtype="uint64")
     for bit in range(delta):
         x |= ((code >> (bit << 1)) & 1) << bit
-        y |= ((code >> (bit << 1 + 1)) & 1) << bit
+        y |= ((code >> ((bit << 1) + 1)) & 1) << bit
 
     return x, y
 
 
 def _flatten_tile(data: np.ndarray):
-    delta = int(np.log(data.size) // np.log(4))
+    delta = int(np.log(data.size) / np.log(4))
     x, y = _decode_zorder(delta)
 
-    return delta[..., x, y]
+    return np.squeeze(data[..., x, y])
 
 
 def _expand_tile(data: np.ndarray):
-    delta = int(np.log(data.size) // np.log(4))
+    nside = int(np.sqrt(data.shape[-1]))
+    delta = int(np.log2(nside))
+
     x, y = _decode_zorder(delta)
 
+    shape = (*data.shape[:-1], 2**delta, 2**delta)
+
     # TODO: figure out how to invert x, y to become a 2D array of indexes into data
-    out = np.empty(data.size, dtype=data.dtype)
+    out = np.empty(shape, dtype=data.dtype)
     out[..., x, y] = data
 
     return out
@@ -52,8 +57,8 @@ def compress(
     chunk: np.ndarray,
     delta: int,
     top_k: int,
-    quantization_dtype: np.DTypeLike = "int16",
-    scale_dtype: np.DTypeLike = "float32",
+    quantization_dtype: np.typing.DTypeLike = "int16",
+    scale_dtype: np.typing.DTypeLike = "float32",
 ) -> CompressedChunk:
     reduction_shape = (*chunk.shape[:-1], -1, 4**delta)
 
@@ -68,23 +73,22 @@ def compress(
         scale_dtype=scale_dtype,
     )
 
-    return CompressedChunk(mean, compressed_residuals)
+    return CompressedChunk(
+        delta=delta, mean=mean[..., 0], residuals=compressed_residuals
+    )
 
 
 def _compress_residuals_dct(
     residuals: np.ndarray,
     top_k: int,
-    quantization_dtype: np.DTypeLike,
-    scale_dtype: np.DTypeLike,
+    quantization_dtype: np.typing.DTypeLike,
+    scale_dtype: np.typing.DTypeLike,
 ) -> CompressedResiduals:
-    if residuals.ndim != 1:
-        raise ValueError("residuals compression only works for 1D arrays")
-
     expanded_residuals = _expand_tile(residuals)
     coefficients = np.reshape(dctn(expanded_residuals, norm="ortho"), (-1,))
 
     # keep the top_k largest magnitude coefficients
-    to_keep = np.argsort(np.abs(coefficients), descending=True)[:top_k]
+    to_keep = np.argsort(np.abs(coefficients))[::-1][:top_k]
     kept_coefficients = coefficients[to_keep]
 
     if kept_coefficients.size == 0:
@@ -107,7 +111,7 @@ def _compress_residuals_dct(
 def _decompress_residuals_dct(
     compressed_residuals: CompressedResiduals,
     shape: tuple[int, int],
-    residuals_dtype: np.DTypeLike,
+    residuals_dtype: np.typing.DTypeLike,
     top_k: int,
 ):
     quantization = compressed_residuals.quantization
@@ -116,27 +120,28 @@ def _decompress_residuals_dct(
 
     kept_coefficients = (quantization / np.iinfo(quantization.dtype).max) * scale
 
-    coefficients = np.zeros(shape, dtype=kept_coefficients.dtype)
+    coefficients = np.reshape(np.zeros(shape, dtype=kept_coefficients.dtype), -1)
     coefficients[coefficient_positions] = kept_coefficients
 
-    tile = idctn(coefficients, shape, norm="ortho")
+    tile = idctn(np.reshape(coefficients, shape), norm="ortho")
     return _flatten_tile(tile)
 
 
 def decompress(compressed: CompressedChunk, delta: int, top_k: int) -> np.ndarray:
-    delta_mean = int(np.log(compressed.mean.shape[0]) / np.log(4))
-    delta_residuals = delta_mean + delta
-
-    shape = (2**delta_residuals, 2**delta_residuals)
+    delta_mean = int(np.log(compressed.mean.shape[-1]) / np.log(4))
+    chunksize = 4 ** (delta_mean + delta)
+    nside = int(np.sqrt(chunksize))
 
     residuals = _decompress_residuals_dct(
         compressed.residuals,
-        shape=shape,
+        shape=(nside, nside),
         residuals_dtype=compressed.mean.dtype,
         top_k=top_k,
     )
 
-    reconstructed = compressed.mean[:, None, ...] + residuals
+    reconstructed = compressed.mean[..., :, None] + np.reshape(
+        residuals, (*residuals.shape[:-1], -1, 4**delta)
+    )
 
-    resulting_shape = (*compressed.mean.shape[1:], -1)
+    resulting_shape = (*compressed.mean.shape[:-1], -1)
     return np.reshape(reconstructed, resulting_shape)
