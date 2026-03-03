@@ -10,6 +10,7 @@ version = "0.1.0"
 [dependencies]
 numpy = ">=2.4.2,<3"
 scipy = ">=1.17.1,<2"
+zarr = ">=3"
 
 [pypi-dependencies]
 healpix-chunk-compression = { path = ".", editable = true }
