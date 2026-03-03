@@ -53,31 +53,6 @@ def _expand_tile(data: np.ndarray):
     return out
 
 
-def compress(
-    chunk: np.ndarray,
-    delta: int,
-    top_k: int,
-    quantization_dtype: np.typing.DTypeLike = "int16",
-    scale_dtype: np.typing.DTypeLike = "float32",
-) -> CompressedChunk:
-    reduction_shape = (*chunk.shape[:-1], -1, 4**delta)
-
-    reshaped = np.reshape(chunk, reduction_shape)
-    mean = np.mean(reshaped, axis=-1, keepdims=True)
-
-    residuals = np.reshape(reshaped - mean, chunk.shape)
-    compressed_residuals = _compress_residuals_dct(
-        residuals,
-        top_k=top_k,
-        quantization_dtype=quantization_dtype,
-        scale_dtype=scale_dtype,
-    )
-
-    return CompressedChunk(
-        delta=delta, mean=mean[..., 0], residuals=compressed_residuals
-    )
-
-
 def _compress_residuals_dct(
     residuals: np.ndarray,
     top_k: int,
@@ -125,6 +100,31 @@ def _decompress_residuals_dct(
 
     tile = idctn(np.reshape(coefficients, shape), norm="ortho")
     return _flatten_tile(tile)
+
+
+def compress(
+    chunk: np.ndarray,
+    delta: int,
+    top_k: int,
+    quantization_dtype: np.typing.DTypeLike = "int16",
+    scale_dtype: np.typing.DTypeLike = "float32",
+) -> CompressedChunk:
+    reduction_shape = (*chunk.shape[:-1], -1, 4**delta)
+
+    reshaped = np.reshape(chunk, reduction_shape)
+    mean = np.mean(reshaped, axis=-1, keepdims=True)
+
+    residuals = np.reshape(reshaped - mean, chunk.shape)
+    compressed_residuals = _compress_residuals_dct(
+        residuals,
+        top_k=top_k,
+        quantization_dtype=quantization_dtype,
+        scale_dtype=scale_dtype,
+    )
+
+    return CompressedChunk(
+        delta=delta, mean=mean[..., 0], residuals=compressed_residuals
+    )
 
 
 def decompress(compressed: CompressedChunk, delta: int, top_k: int) -> np.ndarray:
