@@ -27,7 +27,7 @@ class HccCodec(ArrayBytesCodec):
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
         _, configuration_parsed = parse_named_configuration(
-            data, "hcc", require_configuration=False
+            data, "hcc", require_configuration=True
         )
         configuration_parsed = configuration_parsed or {}
 
@@ -47,9 +47,11 @@ class HccCodec(ArrayBytesCodec):
     def to_dict(self) -> dict[str, JSON]:
         return {
             "name": "hcc",
-            "delta": self.delta,
-            "top_k": self.top_k,
-            "quantization_dtype": self.quantization_dtype,
+            "configuration": {
+                "delta": self.delta,
+                "top_k": self.top_k,
+                "quantization_dtype": self.quantization_dtype,
+            },
         }
 
     async def _decode_single(
