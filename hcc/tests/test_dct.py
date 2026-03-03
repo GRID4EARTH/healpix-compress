@@ -42,13 +42,14 @@ def test_roundtrip_residuals(residuals):
     note(f"dtype: {residuals.dtype}")
 
     compressed = dct._compress_residuals_dct(
-        residuals, top_k, quantization_dtype=np.int16, scale_dtype=np.float32
+        residuals, top_k, quantization_dtype=np.int16, scale_dtype=residuals.dtype
     )
 
     decompressed = dct._decompress_residuals_dct(
-        compressed, shape=(nside, nside), residuals_dtype=np.float32, top_k=top_k
+        compressed, shape=(nside, nside), residuals_dtype=residuals.dtype, top_k=top_k
     )
 
+    assert compressed.scale.dtype == residuals.dtype
     assert compressed.quantization.size == min(top_k, residuals.size)
     assert compressed.coefficient_positions.size == min(top_k, residuals.size)
 
@@ -67,10 +68,11 @@ def test_roundtrip_chunk(chunk_data):
         delta=delta,
         top_k=top_k,
         quantization_dtype="int16",
-        scale_dtype="float32",
+        scale_dtype=chunk_data.dtype,
     )
     decompressed = dct.decompress(compressed, delta=delta, top_k=top_k)
 
+    assert compressed.mean.dtype == chunk_data.dtype
     assert compressed.mean.size == chunk_data.size / 4**delta
     assert compressed.residuals.quantization.size == min(top_k, chunk_data.size)
     assert compressed.residuals.coefficient_positions.size == min(
