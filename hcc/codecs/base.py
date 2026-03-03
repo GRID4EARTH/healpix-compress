@@ -110,7 +110,6 @@ class HccBaseCodec(ArrayBytesCodec):
             np.asarray(lengths, dtype="uint64").view(dtype="B")
         )
 
-        return (
-            sum(array_buffers, start=prototype.buffer.create_zero_length())
-            + length_buffer
+        return prototype.buffer.create_zero_length().combine(
+            array_buffers + [length_buffer]
         )
