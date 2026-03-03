@@ -10,13 +10,12 @@ from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
 from zarr.dtype import UInt64, ZDType, parse_dtype
-from zarr.registry import register_codec
 
 from hcc import compression
 
 
 @dataclass(frozen=True)
-class HccCodec(ArrayBytesCodec):
+class HccBaseCodec(ArrayBytesCodec):
     delta: int
     top_k: int
 
@@ -54,6 +53,12 @@ class HccCodec(ArrayBytesCodec):
             },
         }
 
+    def compress(self, chunk: np.ndarray) -> list[np.ndarray]:
+        raise NotImplementedError("not implemented")
+
+    def decompress(self, components: list[np.ndarray]) -> np.ndarray:
+        raise NotImplementedError("not implemented")
+
     async def _decode_single(
         self, chunk_data: Buffer, chunk_spec: ArraySpec
     ) -> NDBuffer | None:
@@ -76,7 +81,10 @@ class HccCodec(ArrayBytesCodec):
 
         compressed = compression.CompressedChunk.from_arrays(self.delta, arrays)
 
-        return compression.decompress(compressed, delta=self.delta, top_k=self.top_k)
+        chunk_array = self.decompress(compressed)
+
+        prototype = numpy_buffer_prototype()
+        return prototype.ndbuffer.from_ndarray_like(chunk_array)
 
     async def _encode_single(
         self, chunk_array: NDBuffer, chunk_spec: ArraySpec
@@ -88,14 +96,7 @@ class HccCodec(ArrayBytesCodec):
         # 4. convert byte length array to bytes
         # 5. concatenate
 
-        chunk = chunk_array.as_numpy_array()
-        compressed = compression.compress(
-            chunk,
-            delta=self.delta,
-            top_k=self.top_k,
-            quantization_dtype=self.quantization_dtype,
-            scale_dtype=chunk.dtype,
-        )
+        compressed = self.compress(chunk_array.as_numpy_array())
 
         arrays = compressed.extract_arrays()
         prototype = numpy_buffer_prototype()
@@ -113,6 +114,3 @@ class HccCodec(ArrayBytesCodec):
             sum(array_buffers, start=prototype.buffer.create_zero_length())
             + length_buffer
         )
-
-
-register_codec("hcc", HccCodec)
