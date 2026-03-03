@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 from scipy.fft import dctn, idctn
@@ -16,6 +17,22 @@ class CompressedChunk:
     delta: int
     mean: np.ndarray
     residuals: CompressedResiduals
+
+    @classmethod
+    def from_arrays(cls, delta: int, arrays: list[np.ndarray]) -> Self:
+        mean, scale, quantization, coefficient_positions = arrays
+
+        residuals = CompressedResiduals(quantization, scale, coefficient_positions)
+
+        return cls(delta, mean, residuals)
+
+    def extract_arrays(self) -> tuple[np.ndarray]:
+        return [
+            self.mean,
+            self.residuals.scale,
+            self.residuals.quantization,
+            self.residuals.coefficient_positions,
+        ]
 
 
 def _decode_zorder(delta: int):
