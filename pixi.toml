@@ -11,6 +11,9 @@ version = "0.1.0"
 numpy = ">=2.4.2,<3"
 scipy = ">=1.17.1,<2"
 
+[pypi-dependencies]
+healpix-chunk-compression = { path = ".", editable = true }
+
 [feature.py313.dependencies]
 python = "3.13.*"
 
