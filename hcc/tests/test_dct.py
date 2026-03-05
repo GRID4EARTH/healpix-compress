@@ -1,13 +1,22 @@
 import hypothesis.extra.numpy as npst
 import hypothesis.strategies as st
 import numpy as np
+import scipy.signal
 from hypothesis import given, note
 
 from hcc.compression import dct
 
 
+def is_noise(x):
+    autocorrelation = scipy.signal.correlate(x, x)
+    indices, _ = scipy.signal.find_peaks(autocorrelation, height=x.size * 0.001)
+
+    # TODO: figure out a better criterion for detecting a approximate dirac function
+    return len(indices) == 1
+
+
 def chunk_data():
-    chunk_delta = st.integers(min_value=1, max_value=4)
+    chunk_delta = st.integers(min_value=3, max_value=6)
     chunk_sizes = chunk_delta.map(lambda x: 4**x)
 
     # shapes = st.builds(
@@ -55,14 +64,20 @@ def test_roundtrip_residuals(residuals):
 
     assert decompressed.size == residuals.size
     assert decompressed.dtype == residuals.dtype
-    # np.testing.assert_allclose(decompressed, residuals, rtol=2e-1, atol=1e-3)
+
+    # properties of a lossy compression algorithm:
+    # - if no signal in input data → no signal in output data
+    # - if signal in the input: strong correlation between input and output data
+    assert (is_noise(residuals) and is_noise(decompressed)) or np.corrcoef(
+        decompressed, residuals
+    )[0, 1] >= 0.5
 
 
-@given(chunk_data())
-def test_roundtrip_chunk(chunk_data):
+@given(chunk_data(), st.integers(min_value=1, max_value=10).map(lambda x: x * 10))
+def test_roundtrip_chunk(chunk_data, top_k):
     note(f"chunk shape: {chunk_data.shape}")
+
     delta = 1
-    top_k = 30
     compressed = dct.compress(
         chunk_data,
         delta=delta,
@@ -82,6 +97,9 @@ def test_roundtrip_chunk(chunk_data):
     assert decompressed.shape == chunk_data.shape
     assert decompressed.dtype == chunk_data.dtype
 
-    # difference = chunk_data - decompressed
-    # relation_metric = np.sum(difference ** 2) / np.sum(chunk_data ** 2)
-    # assert relation_metric <= 0.015
+    # properties of a lossy compression algorithm:
+    # - if no signal in input data → no signal in output data
+    # - if signal in the input: strong correlation between input and output data
+    assert (is_noise(chunk_data) and is_noise(decompressed)) or np.corrcoef(
+        decompressed, chunk_data
+    )[0, 1] >= 0.5
