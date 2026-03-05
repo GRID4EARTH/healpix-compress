@@ -84,11 +84,11 @@ def _compress_residuals_dct(
     kept_coefficients = coefficients[to_keep]
 
     if kept_coefficients.size == 0:
-        scale = 1.0
+        scale = np.array(1.0, dtype=scale_dtype)
     else:
-        scale = np.max(np.abs(kept_coefficients))
+        scale = np.asarray(np.max(np.abs(kept_coefficients)), dtype=scale_dtype)
         if scale < 0:
-            scale = 1.0
+            scale = np.array(1.0, dtype=scale_dtype)
 
     max_value = np.iinfo(quantization_dtype).max
     quantization = np.round((kept_coefficients / scale) * max_value)
@@ -110,13 +110,17 @@ def _decompress_residuals_dct(
     scale = compressed_residuals.scale
     coefficient_positions = compressed_residuals.coefficient_positions
 
-    kept_coefficients = (quantization / np.iinfo(quantization.dtype).max) * scale
+    kept_coefficients = np.astype(
+        (quantization / np.iinfo(quantization.dtype).max) * scale,
+        scale.dtype,
+    )
 
-    coefficients = np.reshape(np.zeros(shape, dtype=kept_coefficients.dtype), -1)
+    coefficients = np.reshape(np.zeros(shape, dtype=residuals_dtype), -1)
     coefficients[coefficient_positions] = kept_coefficients
 
     tile = idctn(np.reshape(coefficients, shape), norm="ortho")
-    return _flatten_tile(tile)
+
+    return np.astype(_flatten_tile(tile), residuals_dtype)
 
 
 def compress(
@@ -140,7 +144,9 @@ def compress(
     )
 
     return CompressedChunk(
-        delta=delta, mean=mean[..., 0], residuals=compressed_residuals
+        delta=delta,
+        mean=np.astype(mean[..., 0], chunk.dtype),
+        residuals=compressed_residuals,
     )
 
 
@@ -149,15 +155,18 @@ def decompress(compressed: CompressedChunk, delta: int, top_k: int) -> np.ndarra
     chunksize = 4 ** (delta_mean + delta)
     nside = int(np.sqrt(chunksize))
 
+    dtype = compressed.mean.dtype
     residuals = _decompress_residuals_dct(
         compressed.residuals,
         shape=(nside, nside),
-        residuals_dtype=compressed.mean.dtype,
+        residuals_dtype=dtype,
         top_k=top_k,
     )
 
-    reconstructed = compressed.mean[..., :, None] + np.reshape(
-        residuals, (*residuals.shape[:-1], -1, 4**delta)
+    reconstructed = np.astype(
+        compressed.mean[..., :, None]
+        + np.reshape(residuals, (*residuals.shape[:-1], -1, 4**delta)),
+        dtype,
     )
 
     resulting_shape = (*compressed.mean.shape[:-1], -1)

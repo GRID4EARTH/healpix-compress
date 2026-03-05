@@ -1,10 +1,10 @@
 from importlib.metadata import version
 
-from hcc.codec import HccCodec
+import hcc.codecs  # noqa: F401
 
 try:
     __version__ = version("hcc")
 except Exception:
     __version__ = "9999"
 
-__all__ = ["HccCodec"]
+__all__ = []
