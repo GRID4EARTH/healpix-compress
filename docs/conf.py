@@ -23,8 +23,8 @@ extensions = [
 ]
 
 extlinks = {
-    "issue": ("https://github.com/keewis/healpix-chunk-compression/issues/%s", "GH%s"),
-    "pull": ("https://github.com/keewis/healpix-chunk-compression/pull/%s", "PR%s"),
+    "issue": ("https://github.com/EOPF-DGGS/healpix-compress/issues/%s", "GH%s"),
+    "pull": ("https://github.com/EOPF-DGGS/healpix-compress/pull/%s", "PR%s"),
 }
 
 # Add any paths that contain templates here, relative to this directory.
