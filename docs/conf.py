@@ -1,8 +1,8 @@
 # -- Project information -----------------------------------------------------
 import datetime as dt
 
-project = "healpix chunk compression"
-author = f"{project} developers"
+project = "healpix-compress"
+author = "grid4earth project"
 initial_year = "2026"
 year = dt.datetime.now().year
 copyright = f"{initial_year}-{year}, {author}"
