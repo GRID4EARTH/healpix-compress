@@ -2,6 +2,10 @@
 
 This module contains compression algorithms and codecs to compress / uncompress chunks that are aligned with healpix cells.
 
+The idea is that we can downscale the input chunk by a given amount of refinement levels using a simple aggregation (mean), then compute the residuals between input data and aggregation result, and apply a lossy compression algorithm to the residuals.
+
+The result is multiple arrays (one array for the result of the aggregation, and at least one array of potentially different shape for the residuals), which for the zarr codec are converted to bytes and packed into a single binary blob.
+
 ## Usage of the zarr codec
 
 ### Direct use with `zarr-python`
