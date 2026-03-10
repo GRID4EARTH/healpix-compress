@@ -1,8 +1,8 @@
 # -- Project information -----------------------------------------------------
 import datetime as dt
 
-project = "healpix chunk compression"
-author = f"{project} developers"
+project = "healpix-compress"
+author = "grid4earth project"
 initial_year = "2026"
 year = dt.datetime.now().year
 copyright = f"{initial_year}-{year}, {author}"
@@ -23,8 +23,8 @@ extensions = [
 ]
 
 extlinks = {
-    "issue": ("https://github.com/keewis/healpix-chunk-compression/issues/%s", "GH%s"),
-    "pull": ("https://github.com/keewis/healpix-chunk-compression/pull/%s", "PR%s"),
+    "issue": ("https://github.com/EOPF-DGGS/healpix-compress/issues/%s", "GH%s"),
+    "pull": ("https://github.com/EOPF-DGGS/healpix-compress/pull/%s", "PR%s"),
 }
 
 # Add any paths that contain templates here, relative to this directory.
@@ -33,7 +33,7 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "directory"]
+exclude_patterns = ["_build", "**.ipynb_checkpoints", "jupyter_execute"]
 
 
 # -- Options for HTML output -------------------------------------------------

@@ -1,7 +1,6 @@
 [workspace]
-authors = ["Justus Magin <keewis@posteo.de>"]
 channels = ["conda-forge"]
-name = "healpix-chunk-compression"
+name = "healpix-compress"
 platforms = ["linux-64"]
 version = "0.1.0"
 
@@ -13,7 +12,7 @@ scipy = ">=1.17.1,<2"
 zarr = ">=3"
 
 [pypi-dependencies]
-healpix-chunk-compression = { path = ".", editable = true }
+healpix-compress = { path = ".", editable = true }
 
 [feature.py313.dependencies]
 python = "3.13.*"
