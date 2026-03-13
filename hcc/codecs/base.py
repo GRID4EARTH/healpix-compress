@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Self
+from typing import ClassVar, Self
 
 import numpy as np
 from zarr.abc.codec import ArrayBytesCodec
@@ -23,10 +23,12 @@ class HccBaseCodec(ArrayBytesCodec):
 
     dtypes: list[ZDType] = field(default_factory=list)
 
+    name: ClassVar[str] = "hcc"
+
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
         _, configuration_parsed = parse_named_configuration(
-            data, "hcc", require_configuration=True
+            data, cls.name, require_configuration=True
         )
         configuration_parsed = configuration_parsed or {}
 
@@ -45,7 +47,7 @@ class HccBaseCodec(ArrayBytesCodec):
 
     def to_dict(self) -> dict[str, JSON]:
         return {
-            "name": "hcc",
+            "name": self.name,
             "configuration": {
                 "delta": self.delta,
                 "top_k": self.top_k,
