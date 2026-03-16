@@ -6,6 +6,13 @@ The idea is that we can downscale the input chunk by a given amount of refinemen
 
 The result is multiple arrays (one array for the result of the aggregation, and at least one array of potentially different shape for the residuals), which for the zarr codec are converted to bytes and packed into a single binary blob.
 
+## Parameters
+
+The codec has two parameters:
+
+- `delta`: how many refinement levels to average over. The averages will then have a refinement level of `original_level - delta`.
+- `top_k`: how many parameters to keep. This is equivalent to a low-pass filter. The details depend on the actual compression algorithm.
+
 ## Usage of the zarr codec
 
 ### Direct use with `zarr-python`
