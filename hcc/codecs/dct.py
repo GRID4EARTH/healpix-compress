@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import numpy as np
 from zarr.codecs import register_codec
 
@@ -6,6 +8,8 @@ from hcc.compression import dct
 
 
 class HccDctCodec(HccBaseCodec):
+    name: ClassVar[str] = "hcc-dct"
+
     def compress(self, data: np.ndarray) -> list[np.ndarray]:
         compressed = dct.compress(
             data,
@@ -22,4 +26,4 @@ class HccDctCodec(HccBaseCodec):
         return dct.decompress(compressed, delta=self.delta, top_k=self.top_k)
 
 
-register_codec("hcc-dct", HccDctCodec)
+register_codec(HccDctCodec.name, HccDctCodec)
