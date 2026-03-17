@@ -34,5 +34,8 @@ isort = ">=8.0.1,<9"
 pytest = "*"
 hypothesis = ">=6.151.9,<7"
 
+[feature.tests.tasks]
+tests = { cmd = "pytest", default-environment = "dev", cwd = "." }
+
 [environments]
 default = ["dev", "py313", "tests"]
