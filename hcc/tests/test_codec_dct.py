@@ -15,6 +15,28 @@ def test_codec_serialization_roundtrip():
     assert codec == reconstructed
 
 
+def test_evolve_from_array_spec():
+    codec = hcc.codecs.dct.HccDctCodec(delta=2, top_k=100)
+    value_dtype = zarr.dtype.Float32(endianness="little")
+    array_spec = zarr.core.array_spec.ArraySpec(
+        shape=(4**8,),
+        dtype=value_dtype,
+        fill_value=np.nan,
+        config=None,
+        prototype=zarr.core.buffer.numpy_buffer_prototype(),
+    )
+
+    evolved_codec = codec.evolve_from_array_spec(array_spec)
+
+    expected_dtypes = [
+        value_dtype,
+        value_dtype,
+        zarr.dtype.Int16(endianness="little"),
+        zarr.dtype.UInt64(endianness="little"),
+    ]
+    assert evolved_codec.dtypes == expected_dtypes
+
+
 @pytest.mark.parametrize("top_k", [16, 32])
 @pytest.mark.parametrize("delta", [1, 2])
 @pytest.mark.parametrize("chunksize", [16, 64])
