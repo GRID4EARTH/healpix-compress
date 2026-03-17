@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Self
 
 import numpy as np
@@ -8,17 +8,19 @@ from zarr.codecs import register_codec
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
-from zarr.dtype import Float32, UInt8, UInt64
+from zarr.dtype import Float32, UInt8, UInt64, ZDType
 
 from hcc.codecs.packing import pack_array, unpack_array
 from hcc.compression import grad_dct
 
 
 @dataclass(frozen=True)
-class HccDctCodec(ArrayBytesCodec):
+class HccGradDctCodec(ArrayBytesCodec):
     name: ClassVar[str] = "hcc-grad-dct"
 
     window: int = 8
+
+    dtypes: list[ZDType] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -45,7 +47,7 @@ class HccDctCodec(ArrayBytesCodec):
         peu importe le dtype de la donnée d'entrée.
         """
         f32 = Float32(endianness="little")
-        u8 = UInt8(endianness="little")
+        u8 = UInt8()
         dtypes = [
             UInt64(endianness="little"),  # n           -> uint64 (1 element)
             f32,  # low         -> float32
@@ -80,4 +82,4 @@ class HccDctCodec(ArrayBytesCodec):
         return pack_array(prototype, compressed)
 
 
-register_codec(HccDctCodec.name, HccDctCodec)
+register_codec(HccGradDctCodec.name, HccGradDctCodec)
