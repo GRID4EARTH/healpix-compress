@@ -6,7 +6,9 @@ import hcc.codecs.dct  # noqa: F401
 from hcc.tests import is_noise
 
 
-def test_codec_serialization_roundtrip():
+@pytest.mark.parametrize("delta", [1, 2])
+@pytest.mark.parametrize("top_k", [100, 1200, 14000])
+def test_codec_serialization_roundtrip(delta, top_k):
     codec = hcc.codecs.dct.HccDctCodec(delta=2, top_k=100)
 
     serialized = codec.to_dict()
