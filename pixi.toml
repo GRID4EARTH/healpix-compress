@@ -29,6 +29,10 @@ jupyterlab_code_formatter = ">=3.0.3,<4"
 xdggs = ">=0.6.0,<0.7"
 xarray = ">=2026.2.0,<2027"
 isort = ">=8.0.1,<9"
+cartopy = ">=0.25.0,<0.26"
+
+[feature.dev.pypi-dependencies]
+healpix-plot = { git = "https://github.com/EOPF-DGGS/healpix-plot.git" }
 
 [feature.tests.dependencies]
 pytest = "*"
