@@ -1,26 +1,24 @@
+from dataclasses import dataclass, replace
 from typing import ClassVar, Self
-from dataclasses import dataclass, field, replace
 
 import numpy as np
+from zarr.abc.codec import ArrayBytesCodec
+from zarr.buffer.cpu import numpy_buffer_prototype
 from zarr.codecs import register_codec
-from zarr.core.common import JSON, parse_named_configuration
-
-from hcc.codecs.base import HccBaseCodec
-from hcc.compression import grad_dct
-from zarr.dtype import UInt64
 from zarr.core.array_spec import ArraySpec
-from zarr.core.dtype import parse_dtype
+from zarr.core.buffer import Buffer, NDBuffer
+from zarr.core.common import JSON, parse_named_configuration
+from zarr.dtype import Float32, UInt8, UInt64
+
+from hcc.codecs.packing import pack_array, unpack_array
+from hcc.compression import grad_dct
 
 
 @dataclass(frozen=True)
-class HccDctCodec(HccBaseCodec):
+class HccDctCodec(ArrayBytesCodec):
     name: ClassVar[str] = "hcc-grad-dct"
 
     window: int = 8
-
-    # Champs hérités de HccBaseCodec — inutilisés ici, valeurs par défaut obligatoires
-    delta: int = 0
-    top_k: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -38,7 +36,7 @@ class HccDctCodec(HccBaseCodec):
             },
         }
 
-    def _build_dtypes(self):
+    def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
         """Dtypes des 6 tableaux retournés par encode() — toujours fixes,
         indépendants du dtype d'entrée zarr.
 
@@ -46,19 +44,18 @@ class HccDctCodec(HccBaseCodec):
           [uint64, float32, float32, float32, float32, uint8]
         peu importe le dtype de la donnée d'entrée.
         """
-        f32 = parse_dtype("float32", zarr_format=3)
-        u8  = parse_dtype("uint8",   zarr_format=3)
-        return [
+        f32 = Float32(endianness="little")
+        u8 = UInt8(endianness="little")
+        dtypes = [
             UInt64(endianness="little"),  # n           -> uint64 (1 element)
-            f32,                          # low         -> float32
-            f32,                          # q_lo        -> float32 (1 element)
-            f32,                          # q_hi        -> float32 (1 element)
-            f32,                          # sigma_floor -> float32 (1 element)
-            u8,                           # residual_bytes -> uint8 (variable size)
+            f32,  # low         -> float32
+            f32,  # q_lo        -> float32 (1 element)
+            f32,  # q_hi        -> float32 (1 element)
+            f32,  # sigma_floor -> float32 (1 element)
+            u8,  # residual_bytes -> uint8 (variable size)
         ]
 
-    def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
-        return replace(self, dtypes=self._build_dtypes())
+        return replace(self, dtypes=dtypes)
 
     def compress(self, data: np.ndarray) -> list[np.ndarray]:
         return grad_dct.compress(data, window=self.window)
@@ -66,19 +63,21 @@ class HccDctCodec(HccBaseCodec):
     def decompress(self, components: list[np.ndarray]) -> np.ndarray:
         return grad_dct.decompress(components, window=self.window)
 
-    async def _decode_single(self, chunk_data, chunk_spec: ArraySpec):
-        from zarr.buffer.cpu import numpy_buffer_prototype
-        from hcc.codecs.packing import unpack_array
+    async def _decode_single(self, chunk_data: Buffer, chunk_spec: ArraySpec):
+        prototype = numpy_buffer_prototype()
+
+        compressed = unpack_array(prototype, chunk_data, self.dtypes)
+        chunk_array = self.decompress(compressed)
+        return prototype.nd_buffer.from_ndarray_like(chunk_array)
+
+    async def _encode_single(
+        self, chunk_array: NDBuffer, chunk_spec: ArraySpec
+    ) -> Buffer | None:
+        compressed = self.compress(chunk_array.as_numpy_array())
 
         prototype = numpy_buffer_prototype()
 
-        # Dtypes fixes — independants de chunk_spec.dtype (qui est le dtype zarr
-        # d'entree, pas le dtype interne des tableaux compresses)
-        dtypes = self._build_dtypes()
-
-        compressed = unpack_array(prototype, chunk_data, dtypes)
-        chunk_array = self.decompress(compressed)
-        return prototype.nd_buffer.from_ndarray_like(chunk_array)
+        return pack_array(prototype, compressed)
 
 
 register_codec(HccDctCodec.name, HccDctCodec)
