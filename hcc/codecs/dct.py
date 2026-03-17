@@ -30,6 +30,11 @@ class HccDctCodec(ArrayBytesCodec):
             data, cls.name, require_configuration=True
         )
         configuration_parsed = configuration_parsed or {}
+        quantization_dtype = configuration_parsed.get("quantization_dtype")
+        if quantization_dtype is not None:
+            configuration_parsed["quantization_dtype"] = parse_dtype(
+                quantization_dtype, zarr_format=3
+            )
 
         return cls(**configuration_parsed)
 
