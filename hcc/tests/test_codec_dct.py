@@ -2,23 +2,23 @@ import numpy as np
 import pytest
 import zarr
 
-import hcc.codecs.dct  # noqa: F401
+from hcc.codecs import dct
 from hcc.tests import is_noise
 
 
 @pytest.mark.parametrize("delta", [1, 2])
 @pytest.mark.parametrize("top_k", [100, 1200, 14000])
 def test_codec_serialization_roundtrip(delta, top_k):
-    codec = hcc.codecs.dct.HccDctCodec(delta=2, top_k=100)
+    codec = dct.HccDctCodec(delta=2, top_k=100)
 
     serialized = codec.to_dict()
-    reconstructed = hcc.codecs.dct.HccDctCodec.from_dict(serialized)
+    reconstructed = dct.HccDctCodec.from_dict(serialized)
 
     assert codec == reconstructed
 
 
 def test_evolve_from_array_spec():
-    codec = hcc.codecs.dct.HccDctCodec(delta=2, top_k=100)
+    codec = dct.HccDctCodec(delta=2, top_k=100)
     value_dtype = zarr.dtype.Float32(endianness="little")
     array_spec = zarr.core.array_spec.ArraySpec(
         shape=(4**8,),
