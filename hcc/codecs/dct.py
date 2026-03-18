@@ -4,16 +4,17 @@ from typing import ClassVar, Self
 import numpy as np
 from zarr.abc.codec import ArrayBytesCodec
 from zarr.buffer.cpu import numpy_buffer_prototype
-from zarr.codecs import register_codec
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
 from zarr.dtype import Int16, UInt64, ZDType, parse_dtype
 
 from hcc.codecs.packing import pack_array, unpack_array
+from hcc.codecs.register import register_codec
 from hcc.compression import dct
 
 
+@register_codec
 @dataclass(frozen=True)
 class HccDctCodec(ArrayBytesCodec):
     delta: int
@@ -102,6 +103,3 @@ class HccDctCodec(ArrayBytesCodec):
         prototype = numpy_buffer_prototype()
 
         return pack_array(prototype, compressed)
-
-
-register_codec(HccDctCodec.name, HccDctCodec)
