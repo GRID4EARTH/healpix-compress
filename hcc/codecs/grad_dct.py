@@ -39,12 +39,16 @@ class HccGradDctCodec(ArrayBytesCodec):
         }
 
     def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
-        """Dtypes des 6 tableaux retournés par encode() — toujours fixes,
-        indépendants du dtype d'entrée zarr.
+        """dtypes of the 6 arrays are fixed, regardless of the input dtype
 
-        encode() retourne TOUJOURS :
-          [uint64, float32, float32, float32, float32, uint8]
-        peu importe le dtype de la donnée d'entrée.
+        dtypes:
+
+        - n : uint64
+        - low : float32
+        - q_lo : float32
+        - q_hi : float32
+        - sigma_floor : float32
+        - residual_bytes : uint8
         """
         f32 = Float32(endianness="little")
         u8 = UInt8()
