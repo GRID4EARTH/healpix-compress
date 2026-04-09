@@ -37,7 +37,6 @@ a future version of the library cannot make existing data unreadable.
 """
 
 import struct
-import zlib
 from typing import Any, Literal
 
 import numpy as np
@@ -331,21 +330,18 @@ def encode(
 
     Returns
     -------
-    tuple
-        ``(R_q, n, q_lo, q_hi, sigma_floor, low)`` where:
-
-        ``R_q`` : numpy.ndarray of shape (n, n), dtype int8 or int16
-            Quantised normalised residual.
-        ``n`` : int
-            Tile side length.
-        ``q_lo`` : float
-            Lower quantisation bound.
-        ``q_hi`` : float
-            Upper quantisation bound.
-        ``sigma_floor`` : float
-            Variance normalisation floor.
-        ``low`` : numpy.ndarray of shape (n//downsample_factor, n//downsample_factor), dtype float32
-            Low-frequency layer.
+    R_q : numpy.ndarray
+        Quantised normalised residuals of shape (n, n), dtype int8 or int16.
+    n : int
+        Tile side length.
+    q_lo : float
+        Lower quantisation bound.
+    q_hi : float
+        Upper quantisation bound.
+    sigma_floor : float
+        Variance normalisation floor.
+    low : numpy.ndarray
+        Low-frequency layer of shape (n//downsample_factor, n//downsample_factor), dtype float32
 
     See Also
     --------
@@ -376,8 +372,8 @@ def encode(
     R_norm = (R / sigma).astype(np.float32)
 
     # 6. Quantisation
-    n_levels = 2**quantize_bits   # 256 or 65 536
-    half = n_levels // 2          # 128 or 32 768
+    n_levels = 2**quantize_bits  # 256 or 65 536
+    half = n_levels // 2  # 128 or 32 768
 
     q_lo = float(np.percentile(R_norm, clip_percentile))
     q_hi = float(np.percentile(R_norm, 100.0 - clip_percentile))
@@ -458,7 +454,7 @@ def compress(
     zlib_level: int = 9,
     sigma_floor_ratio: float = 0.05,
     downsample_factor: int = 2,
-) -> np.ndarray:
+) -> tuple[np.ndarray, ...]:
     """Compress a HEALPix chunk stored in Z-order into a flat byte array.
 
     Parameters are **not** embedded in the returned bytes.  The caller is
@@ -503,9 +499,18 @@ def compress(
 
     Returns
     -------
-    numpy.ndarray of shape (k,), dtype uint8
-        Compressed byte array.  Length *k* depends on the data and
-        parameters.
+    R_q : numpy.ndarray
+        Quantised normalised residuals of shape (n, n), dtype int8 or int16.
+    n : int
+        Tile side length.
+    q_lo : float
+        Lower quantisation bound.
+    q_hi : float
+        Upper quantisation bound.
+    sigma_floor : float
+        Variance normalisation floor.
+    low : numpy.ndarray
+        Low-frequency layer of shape (n//downsample_factor, n//downsample_factor), dtype float32
 
     Raises
     ------
@@ -546,13 +551,17 @@ def compress(
 
     tile_2d = _expand_tile(data.astype(np.float32))
     return encode(
-        tile_2d, window, quantize_bits, clip_percentile,
-        sigma_floor_ratio, downsample_factor,
+        tile_2d,
+        window,
+        quantize_bits,
+        clip_percentile,
+        sigma_floor_ratio,
+        downsample_factor,
     )
 
 
 def decompress(
-    compressed_data:tuple[np.ndarray,...],
+    compressed_data: tuple[np.ndarray, ...],
     window: int,
     quantize_bits: int = 8,
     clip_percentile: float = 0.5,
@@ -569,8 +578,8 @@ def decompress(
 
     Parameters
     ----------
-    binary_data : numpy.ndarray of dtype uint8
-        Compressed byte array as returned by :func:`compress`.
+    compressed_data : tuple of numpy.ndarray
+        Compressed component arrays as returned by :func:`compress`.
     window : int
         Uniform-filter window size — must match the value used at
         compress time.
@@ -610,9 +619,9 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-    
+
     tile_2d = decode(compressed_data, window, quantize_bits, downsample_factor)
-    
+
     return _flatten_tile(tile_2d)
 
 
@@ -739,7 +748,7 @@ def compression_info(
     n, _q_lo, _q_hi, _sigma_floor = struct.unpack(_HEADER_FMT, buf[:_HEADER_BYTES])
 
     low_m = n // downsample_factor
-    bytes_low = low_m * low_m * 4           # float32
+    bytes_low = low_m * low_m * 4  # float32
     bytes_residual = len(buf) - _HEADER_BYTES - bytes_low
     total_bytes = len(buf)
 
