@@ -545,18 +545,14 @@ def compress(
         raise ValueError("clip_percentile out of range (0, 50)")
 
     tile_2d = _expand_tile(data.astype(np.float32))
-    R_q, n, q_lo, q_hi, sigma_floor, low = encode(
+    return encode(
         tile_2d, window, quantize_bits, clip_percentile,
         sigma_floor_ratio, downsample_factor,
     )
-    residual_bytes = zlib.compress(R_q.tobytes(), level=zlib_level)
-    header = struct.pack(_HEADER_FMT, n, q_lo, q_hi, sigma_floor)
-    raw = header + low.ravel().astype(np.float32).tobytes() + residual_bytes
-    return np.frombuffer(raw, dtype=np.uint8)
 
 
 def decompress(
-    binary_data: np.ndarray,
+    compressed_data:tuple[np.ndarray,...],
     window: int,
     quantize_bits: int = 8,
     clip_percentile: float = 0.5,
@@ -614,17 +610,9 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-    buf = bytes(binary_data)
-    n, q_lo, q_hi, sigma_floor = struct.unpack(_HEADER_FMT, buf[:_HEADER_BYTES])
-    low_m = n // downsample_factor
-    low_nbytes = low_m * low_m * 4  # float32
-    low = np.frombuffer(
-        buf[_HEADER_BYTES : _HEADER_BYTES + low_nbytes], dtype=np.float32
-    ).reshape(low_m, low_m).copy()
-    raw = zlib.decompress(buf[_HEADER_BYTES + low_nbytes :])
-    dtype = np.int8 if quantize_bits == 8 else np.int16
-    R_q = np.frombuffer(raw, dtype=dtype).reshape(n, n).copy()
-    tile_2d = decode((R_q, n, q_lo, q_hi, sigma_floor, low), window, quantize_bits, downsample_factor)
+    
+    tile_2d = decode(compressed_data, window, quantize_bits, downsample_factor)
+    
     return _flatten_tile(tile_2d)
 
 
