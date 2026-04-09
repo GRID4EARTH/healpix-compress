@@ -295,7 +295,7 @@ def local_std(data: np.ndarray, window: int = 8) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────────────────────────
-#  Internal encoder / decoder  (2-D tile ↔ raw bytes)
+#  Internal encoder / decoder  (2-D tile ↔ tuple of arrays)
 # ─────────────────────────────────────────────────────────────────
 
 
@@ -304,23 +304,15 @@ def encode(
     window: int,
     quantize_bits: int,
     clip_percentile: float,
-    zlib_level: int,
     sigma_floor_ratio: float,
     downsample_factor: int,
-) -> bytes:
-    """Encode a square 2-D float32 tile to raw bytes.
+) -> tuple:
+    """Encode a square 2-D float32 tile into a tuple of arrays.
 
     This is an internal function.  Prefer :func:`compress` for external use.
 
-    The returned bytes have the following layout::
-
-        [ 16-byte header ] [ low-frequency layer ] [ zlib residual ]
-
-    Header fields (little-endian):
-        uint32  n             — tile side length
-        float32 q_lo          — lower quantisation bound
-        float32 q_hi          — upper quantisation bound
-        float32 sigma_floor   — variance normalisation floor
+    Entropy compression (zlib) is intentionally absent here so that the
+    zarr codec layer can handle serialisation independently.
 
     Parameters
     ----------
@@ -332,8 +324,6 @@ def encode(
         Residual quantisation depth.
     clip_percentile : float
         Symmetric percentile for residual clipping before quantisation.
-    zlib_level : int
-        zlib compression level (0–9).
     sigma_floor_ratio : float
         Minimum sigma expressed as a fraction of ``std(R)``.
     downsample_factor : {1, 2, 4}
@@ -341,13 +331,26 @@ def encode(
 
     Returns
     -------
-    bytes
-        Encoded binary payload.
+    tuple
+        ``(R_q, n, q_lo, q_hi, sigma_floor, low)`` where:
+
+        ``R_q`` : numpy.ndarray of shape (n, n), dtype int8 or int16
+            Quantised normalised residual.
+        ``n`` : int
+            Tile side length.
+        ``q_lo`` : float
+            Lower quantisation bound.
+        ``q_hi`` : float
+            Upper quantisation bound.
+        ``sigma_floor`` : float
+            Variance normalisation floor.
+        ``low`` : numpy.ndarray of shape (n//downsample_factor, n//downsample_factor), dtype float32
+            Low-frequency layer.
 
     See Also
     --------
     decode : Inverse of this function.
-    compress : Public API — adds Z-order conversion and returns np.ndarray.
+    compress : Public API — adds Z-order conversion, zlib, and binary packing.
     """
     data = data.astype(np.float32)
     n = data.shape[0]
@@ -385,28 +388,24 @@ def encode(
 
     R_q = R_int.astype(np.int8 if quantize_bits == 8 else np.int16)
 
-    # 7. Entropy compression
-    residual_bytes = zlib.compress(R_q.tobytes(), level=zlib_level)
-
-    # 8. Pack: header + low layer + compressed residual
-    header = struct.pack(_HEADER_FMT, n, q_lo, q_hi, sigma_floor)
-    return header + low.ravel().astype(np.float32).tobytes() + residual_bytes
+    return (R_q, n, q_lo, q_hi, sigma_floor, low)
 
 
 def decode(
-    buf: bytes,
+    encoded: tuple,
     window: int,
     quantize_bits: int,
     downsample_factor: int,
 ) -> np.ndarray:
-    """Decode raw bytes produced by :func:`encode` back to a 2-D float32 tile.
+    """Reconstruct a 2-D float32 tile from a tuple produced by :func:`encode`.
 
     This is an internal function.  Prefer :func:`decompress` for external use.
 
     Parameters
     ----------
-    buf : bytes
-        Encoded binary payload as returned by :func:`encode`.
+    encoded : tuple
+        ``(R_q, n, q_lo, q_hi, sigma_floor, low)`` as returned by
+        :func:`encode`.
     window : int
         Uniform-filter window size — must match the value used at encode time.
     quantize_bits : {8, 16}
@@ -421,41 +420,27 @@ def decode(
 
     Notes
     -----
-    ``q_lo``, ``q_hi``, and ``sigma_floor`` are read from the 16-byte binary
-    header; they do not need to be passed as arguments.  The sigma map is
-    recomputed deterministically from the prediction.
+    The sigma map is not stored in the tuple; it is recomputed
+    deterministically from the low-frequency layer at decode time.
 
     See Also
     --------
     encode : Inverse of this function.
-    decompress : Public API — adds Z-order conversion.
+    decompress : Public API — adds Z-order conversion and binary unpacking.
     """
-    # Read header
-    n, q_lo, q_hi, sigma_floor = struct.unpack(_HEADER_FMT, buf[:_HEADER_BYTES])
-
-    # Read low-frequency layer
-    low_m = n // downsample_factor
-    low_nbytes = low_m * low_m * 4  # float32
-    low = np.frombuffer(
-        buf[_HEADER_BYTES : _HEADER_BYTES + low_nbytes], dtype=np.float32
-    ).reshape(low_m, low_m)
+    R_q, n, q_lo, q_hi, sigma_floor, low = encoded
 
     # Reconstruct prediction and sigma map
     pred = upsample(low, factor=downsample_factor)
     sigma = local_std(pred, window=window)
     sigma = np.maximum(sigma, sigma_floor)
 
-    # Decompress residual
-    raw = zlib.decompress(buf[_HEADER_BYTES + low_nbytes :])
-
     n_levels = 2**quantize_bits
     half = n_levels // 2
-    dtype = np.int8 if quantize_bits == 8 else np.int16
-    R_q = np.frombuffer(raw, dtype=dtype).reshape(n, n).astype(np.float32)
 
     # Dequantisation + variance denormalisation
     scale = (q_hi - q_lo) / (n_levels - 1)
-    R = ((R_q + half) * scale + q_lo) * sigma
+    R = ((R_q.astype(np.float32) + half) * scale + q_lo) * sigma
 
     return pred + R
 
@@ -560,8 +545,13 @@ def compress(
         raise ValueError("clip_percentile out of range (0, 50)")
 
     tile_2d = _expand_tile(data.astype(np.float32))
-    raw = encode(tile_2d, window, quantize_bits, clip_percentile,
-                 zlib_level, sigma_floor_ratio, downsample_factor)
+    R_q, n, q_lo, q_hi, sigma_floor, low = encode(
+        tile_2d, window, quantize_bits, clip_percentile,
+        sigma_floor_ratio, downsample_factor,
+    )
+    residual_bytes = zlib.compress(R_q.tobytes(), level=zlib_level)
+    header = struct.pack(_HEADER_FMT, n, q_lo, q_hi, sigma_floor)
+    raw = header + low.ravel().astype(np.float32).tobytes() + residual_bytes
     return np.frombuffer(raw, dtype=np.uint8)
 
 
@@ -625,7 +615,16 @@ def decompress(
     True
     """
     buf = bytes(binary_data)
-    tile_2d = decode(buf, window, quantize_bits, downsample_factor)
+    n, q_lo, q_hi, sigma_floor = struct.unpack(_HEADER_FMT, buf[:_HEADER_BYTES])
+    low_m = n // downsample_factor
+    low_nbytes = low_m * low_m * 4  # float32
+    low = np.frombuffer(
+        buf[_HEADER_BYTES : _HEADER_BYTES + low_nbytes], dtype=np.float32
+    ).reshape(low_m, low_m).copy()
+    raw = zlib.decompress(buf[_HEADER_BYTES + low_nbytes :])
+    dtype = np.int8 if quantize_bits == 8 else np.int16
+    R_q = np.frombuffer(raw, dtype=dtype).reshape(n, n).copy()
+    tile_2d = decode((R_q, n, q_lo, q_hi, sigma_floor, low), window, quantize_bits, downsample_factor)
     return _flatten_tile(tile_2d)
 
 
