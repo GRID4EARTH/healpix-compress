@@ -73,10 +73,24 @@ class HccGradDctCodec(ArrayBytesCodec):
         return replace(self, dtypes=dtypes)
 
     def compress(self, data: np.ndarray) -> list[np.ndarray]:
-        return grad_dct.compress(data, window=self.window)
+        return grad_dct.compress(
+            data,
+            window=self.window,
+            quantize_bits=self.quantize_bits,
+            clip_percentile=self.clip_percentile,
+            sigma_floor_ratio=self.sigma_floor_ratio,
+            downsample_factor=self.downsample_factor,
+        )
 
     def decompress(self, components: list[np.ndarray]) -> np.ndarray:
-        return grad_dct.decompress(components, window=self.window)
+        return grad_dct.decompress(
+            components,
+            window=self.window,
+            quantize_bits=self.quantize_bits,
+            clip_percentile=self.clip_percentile,
+            sigma_floor_ratio=self.sigma_floor_ratio,
+            downsample_factor=self.downsample_factor,
+        )
 
     async def _decode_single(self, chunk_data: Buffer, chunk_spec: ArraySpec):
         prototype = numpy_buffer_prototype()
