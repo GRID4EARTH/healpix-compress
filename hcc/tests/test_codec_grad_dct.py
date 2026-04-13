@@ -46,7 +46,7 @@ def test_evolve_from_array_spec(quantize_bits):
     assert evolved_codec.dtypes == expected_dtypes
 
 
-@pytest.mark.parametrize("chunksize", [32, 64])
+@pytest.mark.parametrize("chunksize", [16, 64])
 @pytest.mark.parametrize("window", [8, 16, 32])
 def test_codec(window, chunksize):
     data = np.concatenate([np.array([0.0], dtype="float64"), np.linspace(1, 0, 255)])
