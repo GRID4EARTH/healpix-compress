@@ -20,6 +20,10 @@ class HccGradDctCodec(ArrayBytesCodec):
     name: ClassVar[str] = "hcc-grad-dct"
 
     window: int = 8
+    quantize_bits: int = 8
+    sigma_floor_ratio: float = 0.05
+    downsample_factor: int = 2
+    clip_percentile: float = 0.5
 
     dtypes: list[ZDType] = field(default_factory=list)
 
