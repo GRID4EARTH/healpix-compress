@@ -87,8 +87,6 @@ class HccGradDctCodec(ArrayBytesCodec):
             components,
             window=self.window,
             quantize_bits=self.quantize_bits,
-            clip_percentile=self.clip_percentile,
-            sigma_floor_ratio=self.sigma_floor_ratio,
             downsample_factor=self.downsample_factor,
         )
 

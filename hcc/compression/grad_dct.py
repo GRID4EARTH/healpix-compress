@@ -460,7 +460,6 @@ def compress(
     window: int,
     quantize_bits: int = 8,
     clip_percentile: float = 0.5,
-    zlib_level: int = 9,
     sigma_floor_ratio: float = 0.05,
     downsample_factor: int = 2,
 ) -> tuple[np.ndarray, ...]:
@@ -480,27 +479,22 @@ def compress(
         Side length of the uniform window used by :func:`local_std` to
         build the local standard-deviation map.  Typical range: 4–32.
         Larger values produce smoother sigma maps.
-    quantize_bits : {8, 16}, optional
-        Bit depth of the quantised residual, by default 8.
+    quantize_bits : {8, 16}, default: 8
+        Bit depth of the quantised residual.
 
         * ``8``  → ``int8``,  256 levels, 1 byte per pixel.
         * ``16`` → ``int16``, 65 536 levels, 2 bytes per pixel.
-    clip_percentile : float, optional
-        Symmetric percentile used to define the quantisation range, by
-        default 0.5.  The residual is clipped to
-        ``[percentile(p), percentile(100−p)]`` before quantisation.
-        Higher values improve entropy compression at the cost of larger
-        reconstruction error in the tails.  Typical range: 0.05–5.0.
-    zlib_level : int, optional
-        Compression level passed to :func:`zlib.compress`, by default 9.
-        ``0`` disables entropy compression; ``9`` is maximum effort.
-        This parameter is lossless and does not affect reconstruction quality.
-    sigma_floor_ratio : float, optional
-        Minimum sigma expressed as a fraction of ``std(R)``, by default 0.05.
+    clip_percentile : float, default: 0.5
+        Symmetric percentile used to define the quantisation range. The residual
+        is clipped to ``[percentile(p), percentile(100−p)]`` before
+        quantisation. Higher values improve entropy compression at the cost of
+        larger reconstruction error in the tails. Typical range: 0.05–5.0.
+    sigma_floor_ratio : float, default: 0.05
+        Minimum sigma expressed as a fraction of ``std(R)``.
         Prevents division by near-zero sigma in flat regions.
         Typical range: 0.005–0.20.
-    downsample_factor : {1, 2, 4}, optional
-        Spatial reduction factor for the low-frequency layer, by default 2.
+    downsample_factor : {1, 2, 4}, default: 2
+        Spatial reduction factor for the low-frequency layer.
 
         * ``1`` – full-resolution low layer (lossless low frequencies).
         * ``2`` – layer at half resolution; recommended default.
@@ -573,9 +567,6 @@ def decompress(
     compressed_data: tuple[np.ndarray, ...],
     window: int,
     quantize_bits: int = 8,
-    clip_percentile: float = 0.5,
-    zlib_level: int = 9,
-    sigma_floor_ratio: float = 0.05,
     downsample_factor: int = 2,
 ) -> np.ndarray:
     """Decompress a byte array produced by :func:`compress`.
@@ -592,18 +583,9 @@ def decompress(
     window : int
         Uniform-filter window size — must match the value used at
         compress time.
-    quantize_bits : {8, 16}, optional
+    quantize_bits : {8, 16}, default: 8
         Residual quantisation depth — must match compress time, by default 8.
-    clip_percentile : float, optional
-        Accepted for API symmetry with :func:`compress`; not used during
-        decompression (``q_lo`` / ``q_hi`` are read from the binary header).
-    zlib_level : int, optional
-        Accepted for API symmetry with :func:`compress`; not used during
-        decompression (zlib decompresses without knowing the original level).
-    sigma_floor_ratio : float, optional
-        Accepted for API symmetry with :func:`compress`; not used during
-        decompression (``sigma_floor`` is read from the binary header).
-    downsample_factor : {1, 2, 4}, optional
+    downsample_factor : {1, 2, 4}, default: 2
         Low-frequency layer reduction factor — must match compress time,
         by default 2.
 
