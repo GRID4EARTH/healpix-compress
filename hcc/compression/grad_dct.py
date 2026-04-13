@@ -108,6 +108,12 @@ _PRESETS: dict[str, dict[str, Any]] = {
 # ─────────────────────────────────────────────────────────────────
 
 
+def _as_square_array(arr):
+    edge_length = int(np.sqrt(arr.size))
+
+    return np.reshape(arr, (edge_length, edge_length))
+
+
 def _decode_zorder(delta: int):
     """Decode Z-order (Morton) curve indices into (x, y) coordinate arrays.
 
@@ -384,7 +390,7 @@ def encode(
 
     R_q = R_int.astype(np.int8 if quantize_bits == 8 else np.int16)
 
-    return (R_q, n, q_lo, q_hi, sigma_floor, low)
+    return (np.ravel(R_q), n, q_lo, q_hi, sigma_floor, np.ravel(low))
 
 
 def decode(
@@ -425,6 +431,9 @@ def decode(
     decompress : Public API — adds Z-order conversion and binary unpacking.
     """
     R_q, n, q_lo, q_hi, sigma_floor, low = encoded
+
+    R_q = _as_square_array(R_q)
+    low = _as_square_array(low)
 
     # Reconstruct prediction and sigma map
     pred = upsample(low, factor=downsample_factor)
@@ -619,7 +628,6 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-
     tile_2d = decode(compressed_data, window, quantize_bits, downsample_factor)
 
     return _flatten_tile(tile_2d)
