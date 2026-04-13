@@ -349,7 +349,7 @@ def encode(
     compress : Public API — adds Z-order conversion, zlib, and binary packing.
     """
     data = data.astype(np.float32)
-    n = data.shape[0]
+    n = np.array(data.shape[0], dtype="uint64")
 
     # 1. Low-frequency layer
     low = downsample(data, factor=downsample_factor)
@@ -365,7 +365,7 @@ def encode(
     #    smooth regions -> low sigma -> small expected residual
     #    active regions -> high sigma -> large expected residual
     sigma = local_std(pred, window=window)
-    sigma_floor = float(np.std(R)) * sigma_floor_ratio
+    sigma_floor = np.std(R) * sigma_floor_ratio
     sigma = np.maximum(sigma, sigma_floor)
 
     # 5. Adaptive variance normalisation (whitens the signal)
@@ -375,8 +375,8 @@ def encode(
     n_levels = 2**quantize_bits  # 256 or 65 536
     half = n_levels // 2  # 128 or 32 768
 
-    q_lo = float(np.percentile(R_norm, clip_percentile))
-    q_hi = float(np.percentile(R_norm, 100.0 - clip_percentile))
+    q_lo = np.percentile(R_norm, clip_percentile)
+    q_hi = np.percentile(R_norm, 100.0 - clip_percentile)
     scale = (q_hi - q_lo) / (n_levels - 1)
 
     R_clipped = np.clip(R_norm, q_lo, q_hi)
