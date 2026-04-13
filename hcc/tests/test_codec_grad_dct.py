@@ -16,8 +16,9 @@ def test_codec_serialization_roundtrip(window):
     assert codec == reconstructed
 
 
-def test_evolve_from_array_spec():
-    codec = grad_dct.HccGradDctCodec(window=8)
+@pytest.mark.parametrize("quantize_bits", [8, 16])
+def test_evolve_from_array_spec(quantize_bits):
+    codec = grad_dct.HccGradDctCodec(window=8, quantize_bits=quantize_bits)
     value_dtype = zarr.dtype.Float32(endianness="little")
     array_spec = zarr.core.array_spec.ArraySpec(
         shape=(4**8,),
@@ -29,13 +30,18 @@ def test_evolve_from_array_spec():
 
     evolved_codec = codec.evolve_from_array_spec(array_spec)
 
+    residuals_dtype = (
+        zarr.dtype.Int8()
+        if quantize_bits == 8
+        else zarr.dtype.Int16(endianness="little")
+    )
     expected_dtypes = [
+        residuals_dtype,
         zarr.dtype.UInt64(endianness="little"),
         zarr.dtype.Float32(endianness="little"),
         zarr.dtype.Float32(endianness="little"),
         zarr.dtype.Float32(endianness="little"),
         zarr.dtype.Float32(endianness="little"),
-        zarr.dtype.UInt8(),
     ]
     assert evolved_codec.dtypes == expected_dtypes
 
