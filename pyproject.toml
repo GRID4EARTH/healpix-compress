@@ -33,7 +33,7 @@ exclude = [
   "__pycache__",
   "docs",
 ]
-target-version = "py313"
+target-version = "py311"
 
 extend-include = ["*.ipynb"]
 line-length = 100
