@@ -18,7 +18,7 @@ def downsample(data: npt.NDArray[T], factor: int) -> npt.NDArray[T]:
 
         * ``1``: the input as a float32 array without modification.
         * ``2``: 2x2 block average of the input array.
-        * ``4`` and greater: bilinear downsampling using :py:func:`scipy.ndimage.zoom`.
+        * ``4`` and greater: bilinear interpolation using :py:func:`scipy.ndimage.zoom`.
 
     Returns
     -------
