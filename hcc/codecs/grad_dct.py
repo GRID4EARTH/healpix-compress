@@ -7,7 +7,7 @@ from zarr.buffer.cpu import numpy_buffer_prototype
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
-from zarr.dtype import Float32, UInt8, UInt64, ZDType
+from zarr.dtype import Float32, Int8, Int16, UInt64, ZDType
 
 from hcc.codecs.packing import pack_array, unpack_array
 from hcc.codecs.register import register_codec
@@ -20,6 +20,10 @@ class HccGradDctCodec(ArrayBytesCodec):
     name: ClassVar[str] = "hcc-grad-dct"
 
     window: int = 8
+    quantize_bits: int = 8
+    sigma_floor_ratio: float = 0.05
+    downsample_factor: int = 2
+    clip_percentile: float = 0.5
 
     dtypes: list[ZDType] = field(default_factory=list)
 
@@ -44,31 +48,47 @@ class HccGradDctCodec(ArrayBytesCodec):
 
         dtypes:
 
+        - R_q: int8 or int16
         - n : uint64
-        - low : float32
         - q_lo : float32
         - q_hi : float32
         - sigma_floor : float32
-        - residual_bytes : uint8
+        - low : float32
         """
+        residuals_dtype = {
+            8: Int8(),
+            16: Int16(endianness="little"),
+        }
+        u64 = UInt64(endianness="little")
         f32 = Float32(endianness="little")
-        u8 = UInt8()
         dtypes = [
-            UInt64(endianness="little"),  # n           -> uint64 (1 element)
-            f32,  # low         -> float32
-            f32,  # q_lo        -> float32 (1 element)
-            f32,  # q_hi        -> float32 (1 element)
+            residuals_dtype[self.quantize_bits],  # R_q -> int8 or int16
+            u64,  # n -> uint64 (1 element)
+            f32,  # q_lo -> float32 (1 element)
+            f32,  # q_hi -> float32 (1 element)
             f32,  # sigma_floor -> float32 (1 element)
-            u8,  # residual_bytes -> uint8 (variable size)
+            f32,  # low -> float32
         ]
 
         return replace(self, dtypes=dtypes)
 
     def compress(self, data: np.ndarray) -> list[np.ndarray]:
-        return grad_dct.compress(data, window=self.window)
+        return grad_dct.compress(
+            data,
+            window=self.window,
+            quantize_bits=self.quantize_bits,
+            clip_percentile=self.clip_percentile,
+            sigma_floor_ratio=self.sigma_floor_ratio,
+            downsample_factor=self.downsample_factor,
+        )
 
     def decompress(self, components: list[np.ndarray]) -> np.ndarray:
-        return grad_dct.decompress(components, window=self.window)
+        return grad_dct.decompress(
+            components,
+            window=self.window,
+            quantize_bits=self.quantize_bits,
+            downsample_factor=self.downsample_factor,
+        )
 
     async def _decode_single(self, chunk_data: Buffer, chunk_spec: ArraySpec):
         prototype = numpy_buffer_prototype()
