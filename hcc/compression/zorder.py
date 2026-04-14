@@ -1,7 +1,10 @@
 import math
+from typing import TypeVar
 
 import numpy as np
 import numpy.typing as npt
+
+T = TypeVar("T", bound=np.floating)
 
 
 def _decode_zorder(delta: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint64]]:
@@ -17,14 +20,14 @@ def _decode_zorder(delta: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.u
     return x, y
 
 
-def flatten_tile[T](data: npt.NDArray[T]) -> npt.NDArray[T]:
+def flatten_tile(data: npt.NDArray[T]) -> npt.NDArray[T]:
     delta = int(np.log(data.size) / np.log(4))
     x, y = _decode_zorder(delta)
 
     return np.squeeze(data[..., x, y])
 
 
-def expand_tile[T](data: npt.NDArray[T]) -> npt.NDArray[T]:
+def expand_tile(data: npt.NDArray[T]) -> npt.NDArray[T]:
     nside = int(math.sqrt(data.shape[-1]))
     delta = int(math.log2(nside))
 
