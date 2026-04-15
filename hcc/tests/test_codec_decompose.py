@@ -83,6 +83,27 @@ def test_codec_to_dict():
     assert sorted(actual["configuration"].keys()) == ["codecs", "factor"]
 
 
+def test_codec_to_dict_roundtrip():
+    factor = 4
+    downsampled_codecs = [
+        BytesCodec(endian="little"),
+        ZstdCodec(),
+    ]
+    residuals_codecs = [
+        BytesCodec(endian="little"),
+        GzipCodec(level=5),
+    ]
+
+    codec = decompose.HccDecompose(
+        factor=factor,
+        codecs={"downsampled": downsampled_codecs, "residuals": residuals_codecs},
+    )
+    serialized = codec.to_dict()
+    deserialized = decompose.HccDecompose.from_dict(serialized)
+
+    assert codec == deserialized
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delta", [1, 2, 4])
 async def test_codec_roundtrip_default_subcodecs(delta):
