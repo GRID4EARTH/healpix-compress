@@ -1,8 +1,58 @@
 import numpy as np
+import pytest
 import zarr
 from zarr.buffer.cpu import numpy_buffer_prototype
 
 from hcc.codecs import packing
+
+
+@pytest.fixture
+def binary_data():
+    return [
+        b"\x00\x00\x66\x32\x66\x36\xcd\x38\x66\x3a\x00\x3c",
+        b"\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00",
+        b"\x53\x00\x00\x00\x00\x00\x00\x00\xbe\x00\x00\x00\x00\x00\x00\x00",
+    ]
+
+
+@pytest.fixture
+def footer():
+    return b"".join(
+        [
+            b"\x0c\x00\x00\x00\x00\x00\x00\x00",  # 3 bytes
+            b"\x10\x00\x00\x00\x00\x00\x00\x00",  # 4 bytes
+            b"\x10\x00\x00\x00\x00\x00\x00\x00",  # 4 bytes
+            b"\x03",
+        ]
+    )
+
+
+def test_pack_buffers(binary_data, footer):
+    prototype = numpy_buffer_prototype()
+    Buffer = prototype.buffer
+
+    array_buffers = [Buffer.from_bytes(x) for x in binary_data]
+
+    packed = packing.pack_buffers(prototype, array_buffers)
+    assert isinstance(packed, Buffer)
+    packed_bytes = packed.to_bytes()
+
+    expected_data = b"".join(binary_data)
+    assert packed_bytes[: len(expected_data)] == expected_data
+
+    actual_footer = packed_bytes[len(expected_data) :]
+    assert actual_footer == footer
+
+
+def test_unpack_buffers(binary_data, footer):
+    prototype = numpy_buffer_prototype()
+    Buffer = prototype.buffer
+
+    binary_buffer = Buffer.from_bytes(b"".join([*binary_data, footer]))
+    unpacked = packing.unpack_buffers(prototype, binary_buffer)
+    unpacked_bytes = [buffer.to_bytes() for buffer in unpacked]
+
+    assert unpacked_bytes == binary_data
 
 
 def test_pack_arrays():
