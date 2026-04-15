@@ -6,7 +6,7 @@ from zarr.abc.codec import ArrayArrayCodec
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
-from zarr.dtype import Float32, Float64, Int8, Int16, ZDType
+from zarr.dtype import Float32, Int8, Int16, ZDType
 
 from hcc.codecs.scalars import decode_scalar, encode_scalar
 from hcc.compression import grad_dct
@@ -24,7 +24,7 @@ class HccGradDctCodec(ArrayArrayCodec):
     dtypes: ClassVar[dict[str, ZDType]] = {
         "q_lo": Float32(endianness="little"),
         "q_hi": Float32(endianness="little"),
-        "sigma_floor": Float64(endianness="little"),
+        "sigma_floor": Float32(endianness="little"),
     }
 
     @property
