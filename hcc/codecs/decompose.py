@@ -21,7 +21,7 @@ from zarr.core.array_spec import ArrayConfig, ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON, parse_named_configuration
 from zarr.dtype import Float32, ZDType
-from zarr.registry import get_pipeline_class
+from zarr.registry import get_codec_class, get_pipeline_class
 
 from hcc.codecs.packing import pack_buffers, unpack_buffers
 from hcc.codecs.utils import _codec_pipeline_as_json
@@ -53,6 +53,19 @@ def array_spec_from_array_spec(
         to_replace["shape"] = shape
 
     return replace(array_spec, **to_replace)
+
+
+def parse_codec(codec: CodecLike) -> Codec:
+    if isinstance(codec, str):
+        return get_codec_class(codec)()
+    elif isinstance(codec, dict):
+        codec_cls = get_codec_class(codec["name"])
+
+        codec.setdefault("configuration", {})
+
+        return codec_cls.from_dict(codec)
+    else:
+        return codec
 
 
 def extract_scalar_order(codecs: list[ArrayArrayCodec]) -> list[str]:
@@ -110,6 +123,12 @@ class HccDecompose(ArrayBytesCodec):
         )
         if not configuration_parsed:
             configuration_parsed = {}
+
+        if "codecs" in configuration_parsed:
+            configuration_parsed["codecs"] = {
+                name: [parse_codec(subcodec) for subcodec in subcodecs]
+                for name, subcodecs in configuration_parsed["codecs"].items()
+            }
 
         return cls(**configuration_parsed)
 
