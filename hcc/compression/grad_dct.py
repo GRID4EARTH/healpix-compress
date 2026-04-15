@@ -40,6 +40,7 @@ import struct
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 from scipy.ndimage import uniform_filter
 from scipy.ndimage import zoom as sp_zoom
 
@@ -391,6 +392,67 @@ def encode(
     R_q = R_int.astype(np.int8 if quantize_bits == 8 else np.int16)
 
     return (np.ravel(R_q), n, q_lo, q_hi, sigma_floor, np.ravel(low))
+
+
+def compress_residuals(
+    residuals: npt.NDArray[np.float32],
+    prediction: npt.NDArray[np.float32],
+    window: int,
+    quantize_bits: int,
+    sigma_floor_ratio: float,
+    clip_percentile: float,
+) -> tuple[
+    npt.NDArray[np.integer],
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+]:
+    # 1. Local variance map
+    #    sigma(x,y) ~ local activity in the prediction:
+    #    smooth regions -> low sigma -> small expected residual
+    #    active regions -> high sigma -> large expected residual
+    sigma = local_std(prediction, window=window)
+    sigma_floor = np.std(residuals) * sigma_floor_ratio
+    sigma = np.maximum(sigma, sigma_floor)
+
+    # 2. Adaptive variance normalisation (whitens the signal)
+    residuals_norm = (residuals / sigma).astype(np.float32)
+
+    # 3. Quantisation
+    n_levels = 2**quantize_bits  # 256 or 65 536
+    half = n_levels // 2  # 128 or 32 768
+
+    q_lo = np.percentile(residuals_norm, clip_percentile)
+    q_hi = np.percentile(residuals_norm, 100.0 - clip_percentile)
+    scale = (q_hi - q_lo) / (n_levels - 1)
+
+    residuals_clipped = np.clip(residuals_norm, q_lo, q_hi)
+    residuals_int = np.round((residuals_clipped - q_lo) / scale - half)
+
+    residuals_q = residuals_int.astype(np.int8 if quantize_bits == 8 else np.int16)
+
+    return residuals_q, q_lo, q_hi, sigma_floor
+
+
+def decompress_residuals(
+    compressed: npt.NDArray[np.integer],
+    prediction: npt.NDArray[np.float32],
+    q_lo: npt.NDArray[np.float32],
+    q_hi: npt.NDArray[np.float32],
+    sigma_floor: npt.NDArray[np.float32],
+    *,
+    window: int,
+    quantize_bits: int,
+) -> npt.NDArray[np.float32]:
+    sigma = local_std(prediction, window=window)
+    sigma = np.maximum(sigma, sigma_floor)
+
+    n_levels = 2**quantize_bits
+    half = n_levels // 2
+
+    # Dequantisation + variance denormalisation
+    scale = (q_hi - q_lo) / (n_levels - 1)
+    return ((compressed.astype(np.float32) + half) * scale + q_lo) * sigma
 
 
 def decode(
