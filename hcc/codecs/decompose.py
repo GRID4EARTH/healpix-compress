@@ -74,6 +74,7 @@ async def pipeline_encode(
     pipeline: CodecPipeline, chunk_array: NDBuffer, array_spec: ArraySpec
 ) -> Buffer:
     encoded = await pipeline.encode([(chunk_array, array_spec)])
+
     scalar_order = extract_scalar_order(pipeline.array_array_codecs)
     scalars = [array_spec.config.scalars[name] for name in scalar_order]
 
