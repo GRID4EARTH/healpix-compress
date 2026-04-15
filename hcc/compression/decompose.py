@@ -33,7 +33,7 @@ def downsample(data: npt.NDArray[T], factor: int) -> npt.NDArray[T]:
     if factor == 1:
         result = data
     elif factor == 2:
-        size = data.size
+        size = data.shape[0]
         shape = (size // 2, 2, size // 2, 2)
         result = np.mean(np.reshape(data, shape), axis=(1, 3))
     else:
