@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zarr.abc.codec import Codec
+
 if TYPE_CHECKING:
-    from zarr.abc.codecs import Codec
     from zarr.core.common import JSON
 
 
