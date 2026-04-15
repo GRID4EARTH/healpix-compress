@@ -104,7 +104,7 @@ class HccDecompose(ArrayBytesCodec):
 
     factor: int
 
-    codecs: dict[str, list[CodecLike] | None] = field(default_factory=list)
+    codecs: dict[str, list[Codec] | None] = field(default_factory=list)
 
     def __post_init__(self):
         for name in self.codecs:
