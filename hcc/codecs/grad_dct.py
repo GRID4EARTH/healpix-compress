@@ -51,15 +51,6 @@ class HccGradDctCodec(ArrayArrayCodec):
             },
         }
 
-    def compress(self, data: np.ndarray) -> list[np.ndarray]:
-        return grad_dct.compress(
-            data,
-            window=self.window,
-            quantize_bits=self.quantize_bits,
-            clip_percentile=self.clip_percentile,
-            sigma_floor_ratio=self.sigma_floor_ratio,
-        )
-
     def resolve_metadata(self, chunk_spec: ArraySpec) -> ArraySpec:
         target_dtypes = {
             8: Int8(),
