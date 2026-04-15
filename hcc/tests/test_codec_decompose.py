@@ -85,7 +85,7 @@ def test_codec_to_dict():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delta", [1, 2, 4])
-async def test_codec_serialization_roundtrip_default_subcodecs(delta):
+async def test_codec_roundtrip_default_subcodecs(delta):
     prototype = zarr.buffer.cpu.numpy_buffer_prototype()
 
     codec = decompose.HccDecompose(
