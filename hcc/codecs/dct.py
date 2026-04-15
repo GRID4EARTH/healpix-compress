@@ -31,7 +31,7 @@ class HccDctCodec(ArrayBytesCodec):
 
     quantization_dtype: ZDType = Int16(endianness="little")
 
-    data_codecs: list[Codec | dict[str, JSON]] | None = None
+    downsampled_codecs: list[Codec | dict[str, JSON]] | None = None
     residuals_codecs: list[Codec | dict[str, JSON]] | None = None
 
     dtypes: list[ZDType] = field(default_factory=list)
@@ -71,14 +71,6 @@ class HccDctCodec(ArrayBytesCodec):
                 "delta": self.delta,
                 "top_k": self.top_k,
                 "quantization_dtype": self.quantization_dtype.to_json(zarr_format=3),
-                "data_codecs": [
-                    getattr(codec, "to_dict", lambda x: x)()
-                    for codec in self.data_codecs
-                ],
-                "residual_codecs": [
-                    getattr(codec, "to_dict", lambda x: x)()
-                    for codec in self.residual_codecs
-                ],
             },
         }
 
