@@ -1,26 +1,17 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import ClassVar, Self
 
 import numpy as np
 from zarr.abc.codec import ArrayBytesCodec
 from zarr.buffer.cpu import numpy_buffer_prototype
-from zarr.core.common import parse_named_configuration
-from zarr.dtype import Int16, UInt64, parse_dtype
+from zarr.core.array_spec import ArraySpec
+from zarr.core.buffer import Buffer, NDBuffer
+from zarr.core.common import JSON, parse_named_configuration
+from zarr.dtype import Int16, UInt64, ZDType, parse_dtype
 
 from hcc.codecs.packing import pack_array, unpack_array
 from hcc.codecs.register import register_codec
 from hcc.compression import dct
-
-if TYPE_CHECKING:
-    from typing import ClassVar, Self
-
-    from zarr.abc.codec import Codec
-    from zarr.core.array_spec import ArraySpec
-    from zarr.core.buffer import Buffer, NDBuffer
-    from zarr.core.common import JSON
-    from zarr.dtype import ZDType
 
 
 @register_codec
@@ -30,10 +21,6 @@ class HccDctCodec(ArrayBytesCodec):
     top_k: int
 
     quantization_dtype: ZDType = Int16(endianness="little")
-
-    downsampled_codecs: list[Codec | dict[str, JSON]] | None = None
-    residuals_codecs: list[Codec | dict[str, JSON]] | None = None
-
     dtypes: list[ZDType] = field(default_factory=list)
 
     name: ClassVar[str] = "hcc-dct"
@@ -44,6 +31,11 @@ class HccDctCodec(ArrayBytesCodec):
             data, cls.name, require_configuration=True
         )
         configuration_parsed = configuration_parsed or {}
+        quantization_dtype = configuration_parsed.get("quantization_dtype")
+        if quantization_dtype is not None:
+            configuration_parsed["quantization_dtype"] = parse_dtype(
+                quantization_dtype, zarr_format=3
+            )
 
         quantization_dtype = configuration_parsed.get("quantization_dtype")
         if quantization_dtype is not None:
