@@ -1,10 +1,3 @@
-# goal:
-# - transform from chunk order to chunk tile order (using the z-order curve)
-# - downsample
-# - upsample
-# - compute differences
-# - apply subcodec pipelines
-# - merge scalars
 from dataclasses import asdict, dataclass, field, replace
 from typing import ClassVar, Self
 
@@ -143,10 +136,6 @@ class HccDecompose(ArrayBytesCodec):
         }
 
     def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
-        # modifications:
-        # - dtypes for downsampled / residuals
-        # - scalar dtypes
-        # - endianness for bytes codecs
         subarray_dtype = Float32(endianness="little")
         config = ArrayConfigWithScalars(order="C", write_empty_chunks=False)
 
@@ -168,17 +157,6 @@ class HccDecompose(ArrayBytesCodec):
     async def _decode_single(
         self, chunk_data: Buffer, chunk_spec: ArraySpec
     ) -> NDBuffer:
-        # steps:
-        # - split into array buffers (lookup table at the end)
-        # - for each array:
-        #   - split into scalar and array buffer
-        #   - construct array spec for each array (pass along scalars)
-        #   - construct codec pipelines
-        #   - call decode
-        # - upsample downsampled
-        # - add residuals to upsampled
-        # - flatten tile
-        # - construct NDBuffer
         pipeline_cls = get_pipeline_class()
         prototype = chunk_spec.prototype
 
@@ -226,10 +204,6 @@ class HccDecompose(ArrayBytesCodec):
         upsampled = upsample(downsampled, self.factor)
 
         residuals = data - upsampled
-
-        print(
-            "encode:", downsampled.shape, upsampled.shape, residuals.shape, self.factor
-        )
 
         # encode downsampled
         downsampled_bytes = await pipeline_encode(
