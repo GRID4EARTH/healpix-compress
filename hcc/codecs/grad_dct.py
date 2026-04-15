@@ -40,6 +40,10 @@ class HccGradDctCodec(ArrayBytesCodec):
             "name": self.name,
             "configuration": {
                 "window": self.window,
+                "quantize_bits": self.quantize_bits,
+                "sigma_floor_ratio": self.sigma_floor_ratio,
+                "downsample_factor": self.downsample_factor,
+                "clip_percentile": self.clip_percentile,
             },
         }
 
