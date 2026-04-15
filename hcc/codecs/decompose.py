@@ -34,6 +34,7 @@ def default_codec_pipeline(dtype: ZDType) -> list[Codec]:
 @dataclass(frozen=True)
 class ArrayConfigWithScalars(ArrayConfig):
     scalars: dict[str, Buffer] = field(default_factory=dict)
+    context: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def array_spec_from_array_spec(
@@ -175,20 +176,22 @@ class HccDecompose(ArrayBytesCodec):
         )
         downsampled = downsampled_buffer.as_numpy_array()
 
+        prediction = upsample(downsampled, self.factor)
+        residuals_spec = array_spec_from_array_spec(
+            chunk_spec,
+            dtype=Float32(endianness="little"),
+            shape=(nside, nside),
+        )
+        residuals_spec.config.context["prediction"] = prediction
+
         residuals_buffer = await pipeline_decode(
             pipeline_cls.from_codecs(self.codecs["residuals"]),
             unpacked_buffers[1],
-            array_spec_from_array_spec(
-                chunk_spec,
-                dtype=Float32(endianness="little"),
-                shape=(nside, nside),
-            ),
+            residuals_spec,
         )
         residuals = residuals_buffer.as_numpy_array()
 
-        upsampled = upsample(downsampled, self.factor)
-
-        reconstructed = flatten_tile(upsampled + residuals)
+        reconstructed = flatten_tile(prediction + residuals)
 
         return prototype.nd_buffer.from_ndarray_like(reconstructed)
 
@@ -201,9 +204,9 @@ class HccDecompose(ArrayBytesCodec):
         data = expand_tile(chunk_array.as_numpy_array())
 
         downsampled = downsample(data, self.factor)
-        upsampled = upsample(downsampled, self.factor)
+        prediction = upsample(downsampled, self.factor)
 
-        residuals = data - upsampled
+        residuals = data - prediction
 
         # encode downsampled
         downsampled_bytes = await pipeline_encode(
@@ -217,14 +220,16 @@ class HccDecompose(ArrayBytesCodec):
         )
 
         # encode residuals
+        residuals_spec = array_spec_from_array_spec(
+            chunk_spec,
+            dtype=Float32(endianness="little"),
+            shape=residuals.shape,
+        )
+        residuals_spec.config.context["prediction"] = prediction
         residuals_bytes = await pipeline_encode(
             pipeline_cls.from_codecs(self.codecs["residuals"]),
             prototype.nd_buffer.from_numpy_array(residuals),
-            array_spec_from_array_spec(
-                chunk_spec,
-                dtype=Float32(endianness="little"),
-                shape=residuals.shape,
-            ),
+            residuals_spec,
         )
 
         # pack into a single buffer
