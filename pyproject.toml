@@ -12,6 +12,7 @@ dynamic = ["version"]
 [project.entry-points."zarr.codecs"]
 hcc-dct = "hcc.codecs.dct:HccDctCodec"
 hcc-grad-dct = "hcc.codecs.grad_dct:HccGradDctCodec"
+hcc-decompose = "hcc.codecs.decompose:HccDecomposeCodec"
 
 [build-system]
 requires = ["setuptools>=64.0", "setuptools-scm"]
@@ -33,7 +34,7 @@ exclude = [
   "__pycache__",
   "docs",
 ]
-target-version = "py313"
+target-version = "py311"
 
 extend-include = ["*.ipynb"]
 line-length = 100
