@@ -7,15 +7,17 @@ source:
 
 build:
   number: 0
+  noarch: python
 
   script: |
-    ${PYTHON} -m pip install . -vvv --no-build-isolation --no-deps
+    SETUPTOOLS_SCM_PRETEND_VERSION=${{ version }} ${PYTHON} -m pip install . -vvv --no-build-isolation --no-deps
 
 requirements:
   build:
     - python
   host:
     - python
+    - pip
     - setuptools >=80
     - setuptools-scm >=8
   run:
