@@ -1,0 +1,58 @@
+name: weekly releases to prefix
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build package
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+
+      - name: build package
+        run: pixi run build-package
+
+      - name: upload artifacts
+        uses: actions/upload-artifacts@v8
+        with:
+          name: package
+          path: target/conda/noarch/healpix-compress*
+
+  publish:
+    name: Publish the package
+    runs-on: ubuntu-latest
+
+    environment:
+      name: prefix
+      url: https://prefix.dev/grid4earth
+    permissions:
+      id-token: write
+
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifacts@v7
+        with:
+          name: package
+          path: dist
+
+      - name: setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+
+      - name: publish
+        run: |
+          pixi upload prefix -c grid4earth dist/healpix-compress* --generate-attestation
