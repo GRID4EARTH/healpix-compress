@@ -42,7 +42,7 @@ jobs:
       name: prefix
       url: https://prefix.dev/grid4earth
     permissions:
-      id-token: write
+      id-token: write # allow uploads to prefix.dev/grid4earth
 
     steps:
       - name: download artifacts
