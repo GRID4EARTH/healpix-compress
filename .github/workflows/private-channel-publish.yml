@@ -34,6 +34,7 @@ jobs:
           path: target/conda/noarch/healpix-compress*
 
   publish:
+    needs: build
     name: Publish the package
     runs-on: ubuntu-latest
 
