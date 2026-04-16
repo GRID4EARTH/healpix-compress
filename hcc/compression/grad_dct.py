@@ -412,7 +412,7 @@ def compress_residuals(
     #    smooth regions -> low sigma -> small expected residual
     #    active regions -> high sigma -> large expected residual
     sigma = local_std(prediction, window=window)
-    sigma_floor = np.std(residuals) * sigma_floor_ratio
+    sigma_floor = np.std(residuals) * residuals.dtype.type(sigma_floor_ratio)
     sigma = np.maximum(sigma, sigma_floor)
 
     # 2. Adaptive variance normalisation (whitens the signal)
