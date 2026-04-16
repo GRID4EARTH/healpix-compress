@@ -25,3 +25,7 @@ __pycache__/
 .pixi/*
 !.pixi/config.toml
 pixi.lock
+
+# ci
+/ci/rattler-recipe/recipe.yaml
+/target
