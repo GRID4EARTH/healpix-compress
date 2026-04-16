@@ -51,6 +51,11 @@ rattler-build = ">=0.62.2,<0.63"
 [feature.packaging.tasks]
 prepare-recipe = { cmd = "python ci/rattler-recipe/prepare_recipe.py", cwd = "." }
 
+[feature.packaging.tasks.build-package]
+cmd = "rattler-build build -c https://prefix.dev/conda-forge --output-dir target/conda --recipe ci/rattler-recipe/recipe.yaml"
+depends-on = ["prepare-recipe"]
+cwd = "."
+
 [environments]
 default = ["dev", "py313", "tests"]
 packaging = { features = ["packaging"], no-default-feature = true }
