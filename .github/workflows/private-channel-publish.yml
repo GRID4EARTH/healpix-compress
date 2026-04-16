@@ -59,4 +59,4 @@ jobs:
 
       - name: publish
         run: |
-          pixi upload prefix -c grid4earth dist/healpix-compress* --generate-attestation
+          pixi upload prefix -c grid4earth dist/healpix-compress*
