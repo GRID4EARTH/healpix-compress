@@ -10,8 +10,18 @@ from hcc.tests import is_noise
 
 
 @pytest.mark.parametrize("window", [8, 16, 32])
-def test_codec_serialization_roundtrip(window):
-    codec = grad_dct.HccGradDctCodec(window=window)
+@pytest.mark.parametrize("quantize_bits", [8, 16])
+@pytest.mark.parametrize("sigma_floor_ratio", [0.05, 0.10])
+@pytest.mark.parametrize("clip_percentile", [0.5, 0.1])
+def test_codec_serialization_roundtrip(
+    window, quantize_bits, sigma_floor_ratio, clip_percentile
+):
+    codec = grad_dct.HccGradDctCodec(
+        window=window,
+        quantize_bits=quantize_bits,
+        sigma_floor_ratio=sigma_floor_ratio,
+        clip_percentile=clip_percentile,
+    )
 
     serialized = codec.to_dict()
     reconstructed = grad_dct.HccGradDctCodec.from_dict(serialized)
