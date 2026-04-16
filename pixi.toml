@@ -42,5 +42,15 @@ pytest-asyncio = ">=1.3.0,<2"
 [feature.tests.tasks]
 tests = { cmd = "pytest", default-environment = "dev", cwd = "." }
 
+[feature.packaging.dependencies]
+gitpython = "*"
+cytoolz = "*"
+packaging = "*"
+rattler-build = ">=0.62.2,<0.63"
+
+[feature.packaging.tasks]
+prepare-recipe = { cmd = "python ci/rattler-recipe/prepare_recipe.py", cwd = "." }
+
 [environments]
 default = ["dev", "py313", "tests"]
+packaging = { features = ["packaging"], no-default-feature = true }

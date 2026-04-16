@@ -1,0 +1,40 @@
+package:
+  name: healpix-compress
+  version: ${{ version }}
+
+source:
+  - path: ../..
+
+build:
+  number: 0
+
+  script: |
+    ${PYTHON} -m pip install . -vvv --no-build-isolation --no-deps
+
+requirements:
+  build:
+    - python
+  host:
+    - python
+    - setuptools >=80
+    - setuptools-scm >=8
+  run:
+    - python
+    - numpy>=2
+    - zarr>=3
+    - scipy >=1.16
+
+tests:
+  - script: pytest
+    requirements:
+      run:
+        - pytest
+        - pytest-asyncio
+        - hypothesis
+
+about:
+  summary: Zarr codec for compressing chunks of healpix data
+  license: Apache-2.0
+  license_file: LICENSE
+  homepage: https://github.com/EOPF-DGGS/healpix-compress
+  repository: https://github.com/EOPF-DGGS/healpix-compress
