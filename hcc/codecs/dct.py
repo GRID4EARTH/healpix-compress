@@ -10,11 +10,9 @@ from zarr.core.common import JSON, parse_named_configuration
 from zarr.dtype import Int16, UInt64, ZDType, parse_dtype
 
 from hcc.codecs.packing import pack_array, unpack_array
-from hcc.codecs.register import register_codec
 from hcc.compression import dct
 
 
-@register_codec
 @dataclass(frozen=True)
 class HccDctCodec(ArrayBytesCodec):
     delta: int
