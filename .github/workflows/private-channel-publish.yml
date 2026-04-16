@@ -1,8 +1,6 @@
 name: weekly releases to prefix
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
 
 permissions: {}
 
@@ -42,7 +40,6 @@ jobs:
     needs: build
     name: Publish the package
     runs-on: ubuntu-latest
-    if: github.event_name == "workflow_dispatch"
 
     environment:
       name: prefix
