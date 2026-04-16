@@ -202,7 +202,7 @@ class HccDecomposeCodec(ArrayBytesCodec):
         pipeline_cls = get_pipeline_class()
         prototype = chunk_spec.prototype
 
-        data = expand_tile(chunk_array.as_numpy_array())
+        data = expand_tile(np.astype(chunk_array.as_numpy_array(), np.float32))
 
         downsampled = downsample(data, self.factor)
         prediction = upsample(downsampled, self.factor)
