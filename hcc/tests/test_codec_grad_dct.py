@@ -123,13 +123,13 @@ async def test_codec(
 
 @pytest.mark.parametrize("name", ["low", "medium", "high", "ultra"])
 def test_lookup_preset(name):
-    from hcc.codecs.decompose import HccDecompose
+    from hcc.codecs.decompose import HccDecomposeCodec
     from hcc.compression.grad_dct import lookup_preset as lookup_raw_preset
 
     presets = lookup_raw_preset(name)
     codec = grad_dct.lookup_preset(name)
 
-    assert isinstance(codec, HccDecompose)
+    assert isinstance(codec, HccDecomposeCodec)
     assert codec.factor == presets["downsample_factor"]
     assert codec.codecs["downsampled"][-1].level == presets["zlib_level"]
 

@@ -36,7 +36,7 @@ def test_array_spec_from_array():
 def test_codec_from_dict():
     factor = 2
 
-    codec = decompose.HccDecompose.from_dict(
+    codec = decompose.HccDecomposeCodec.from_dict(
         {
             "name": "hcc-decompose",
             "configuration": {
@@ -73,7 +73,7 @@ def test_codec_to_dict():
         GzipCodec(level=5),
     ]
 
-    codec = decompose.HccDecompose(
+    codec = decompose.HccDecomposeCodec(
         factor=factor,
         codecs={"downsampled": downsampled_codecs, "residuals": residuals_codecs},
     )
@@ -94,12 +94,12 @@ def test_codec_to_dict_roundtrip():
         GzipCodec(level=5),
     ]
 
-    codec = decompose.HccDecompose(
+    codec = decompose.HccDecomposeCodec(
         factor=factor,
         codecs={"downsampled": downsampled_codecs, "residuals": residuals_codecs},
     )
     serialized = codec.to_dict()
-    deserialized = decompose.HccDecompose.from_dict(serialized)
+    deserialized = decompose.HccDecomposeCodec.from_dict(serialized)
 
     assert codec == deserialized
 
@@ -109,7 +109,7 @@ def test_codec_to_dict_roundtrip():
 async def test_codec_roundtrip_default_subcodecs(delta):
     prototype = zarr.buffer.cpu.numpy_buffer_prototype()
 
-    codec = decompose.HccDecompose(
+    codec = decompose.HccDecomposeCodec(
         factor=delta,
         codecs={"downsampled": None, "residuals": None},
     )

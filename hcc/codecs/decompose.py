@@ -94,7 +94,7 @@ async def pipeline_decode(
 
 
 @dataclass(frozen=True)
-class HccDecompose(ArrayBytesCodec):
+class HccDecomposeCodec(ArrayBytesCodec):
     name: ClassVar[str] = "hcc-decompose"
 
     factor: int

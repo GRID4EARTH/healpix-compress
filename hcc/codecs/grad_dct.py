@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from zarr.core.common import JSON
     from zarr.dtype import ZDType
 
-    from hcc.codecs.decompose import HccDecompose
+    from hcc.codecs.decompose import HccDecomposeCodec
 
 
 @dataclass(frozen=True)
@@ -122,17 +122,17 @@ class HccGradDctCodec(ArrayArrayCodec):
         return encoded_data
 
 
-def lookup_preset(name: str) -> HccDecompose:
+def lookup_preset(name: str) -> HccDecomposeCodec:
     from zarr.codecs import BytesCodec, GzipCodec
 
-    from hcc.codecs.decompose import HccDecompose
+    from hcc.codecs.decompose import HccDecomposeCodec
     from hcc.compression.grad_dct import lookup_preset
 
     presets = lookup_preset(name)
     factor = presets.pop("downsample_factor")
     level = presets.pop("zlib_level")
 
-    return HccDecompose(
+    return HccDecomposeCodec(
         factor=factor,
         codecs={
             "downsampled": [BytesCodec(), GzipCodec(level=level)],
