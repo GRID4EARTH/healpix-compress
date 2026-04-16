@@ -119,3 +119,24 @@ async def test_codec(
     assert (
         is_noise(np.ravel(ravelled_data)) and is_noise(ravelled_roundtripped)
     ) or np.corrcoef(ravelled_roundtripped, ravelled_data)[0, 1] >= 0.5
+
+
+@pytest.mark.parametrize("name", ["low", "medium", "high", "ultra"])
+def test_lookup_preset(name):
+    from hcc.codecs.decompose import HccDecompose
+    from hcc.compression.grad_dct import lookup_preset as lookup_raw_preset
+
+    presets = lookup_raw_preset(name)
+    codec = grad_dct.lookup_preset(name)
+
+    assert isinstance(codec, HccDecompose)
+    assert codec.factor == presets["downsample_factor"]
+    assert codec.codecs["downsampled"][-1].level == presets["zlib_level"]
+
+    grad_dct_codec = codec.codecs["residuals"][0]
+    assert grad_dct_codec.window == presets["window"]
+    assert grad_dct_codec.quantize_bits == presets["quantize_bits"]
+    assert grad_dct_codec.sigma_floor_ratio == presets["sigma_floor_ratio"]
+    assert grad_dct_codec.clip_percentile == presets["clip_percentile"]
+
+    assert codec.codecs["residuals"][-1].level == presets["zlib_level"]

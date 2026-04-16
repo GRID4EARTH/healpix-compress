@@ -1,15 +1,25 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 from zarr.abc.codec import ArrayArrayCodec
-from zarr.core.array_spec import ArraySpec
-from zarr.core.buffer import Buffer, NDBuffer
-from zarr.core.common import JSON, parse_named_configuration
-from zarr.dtype import Float32, Int8, Int16, ZDType
+from zarr.core.common import parse_named_configuration
+from zarr.dtype import Float32, Int8, Int16
 
 from hcc.codecs.scalars import decode_scalar, encode_scalar
 from hcc.compression import grad_dct
+
+if TYPE_CHECKING:
+    from typing import Self
+
+    from zarr.abc.buffer import Buffer, NDBuffer
+    from zarr.core.array_spec import ArraySpec
+    from zarr.core.common import JSON
+    from zarr.dtype import ZDType
+
+    from hcc.codecs.decompose import HccDecompose
 
 
 @dataclass(frozen=True)
@@ -110,3 +120,26 @@ class HccGradDctCodec(ArrayArrayCodec):
         )
 
         return encoded_data
+
+
+def lookup_preset(name: str) -> HccDecompose:
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    from hcc.codecs.decompose import HccDecompose
+    from hcc.compression.grad_dct import lookup_preset
+
+    presets = lookup_preset(name)
+    factor = presets.pop("downsample_factor")
+    level = presets.pop("zlib_level")
+
+    return HccDecompose(
+        factor=factor,
+        codecs={
+            "downsampled": [BytesCodec(), GzipCodec(level=level)],
+            "residuals": [
+                HccGradDctCodec(**presets),
+                BytesCodec(),
+                GzipCodec(level=level),
+            ],
+        },
+    )
