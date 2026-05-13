@@ -32,7 +32,7 @@ isort = ">=8.0.1,<9"
 cartopy = ">=0.25.0,<0.26"
 
 [feature.dev.pypi-dependencies]
-healpix-plot = { git = "https://github.com/EOPF-DGGS/healpix-plot.git" }
+healpix-plot = { git = "https://github.com/GRID4EARTH/healpix-plot.git" }
 
 [feature.tests.dependencies]
 pytest = "*"

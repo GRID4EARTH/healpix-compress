@@ -38,5 +38,5 @@ about:
   summary: Zarr codec for compressing chunks of healpix data
   license: Apache-2.0
   license_file: LICENSE
-  homepage: https://github.com/EOPF-DGGS/healpix-compress
-  repository: https://github.com/EOPF-DGGS/healpix-compress
+  homepage: https://github.com/GRID4EARTH/healpix-compress
+  repository: https://github.com/GRID4EARTH/healpix-compress
