@@ -38,8 +38,8 @@ numpydoc_show_class_members = False
 numpydoc_class_members_toctree = False
 
 extlinks = {
-    "issue": ("https://github.com/EOPF-DGGS/healpix-compress/issues/%s", "GH%s"),
-    "pull": ("https://github.com/EOPF-DGGS/healpix-compress/pull/%s", "PR%s"),
+    "issue": ("https://github.com/GRID4EARTH/healpix-compress/issues/%s", "GH%s"),
+    "pull": ("https://github.com/GRID4EARTH/healpix-compress/pull/%s", "PR%s"),
 }
 
 # Add any paths that contain templates here, relative to this directory.
