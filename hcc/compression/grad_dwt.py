@@ -536,7 +536,13 @@ def compress(
     if not (0.0 < clip_percentile < 50.0):
         raise ValueError("clip_percentile must be in the open interval (0, 50)")
 
-    tile_2d = expand_tile(data.astype(np.float32))
+    data = np.asarray(data, dtype=np.float32)
+    if data.ndim == 2:
+        # Already a spatial 2D tile — use as-is.
+        tile_2d = data
+    else:
+        # 1-D Z-order (Morton) encoded array — expand to 2-D.
+        tile_2d = expand_tile(data)
     n = tile_2d.shape[0]
 
     max_lv = _max_levels(n, wavelet)
