@@ -582,6 +582,7 @@ def compress(
     clip_percentile: float = 0.5,
     downsample_factor: int = 2,
     zlib_level: int = 9,
+    force_compress_low: bool = True,
 ) -> tuple:
     """Compress a HEALPix chunk stored in Z-order into a tuple of arrays.
 
@@ -619,6 +620,11 @@ def compress(
         * ``4`` — quarter resolution; smallest file, most loss.
     zlib_level : int, default 9
         zlib compression level for the quantised residual (0–9).
+    force_compress_low : bool, default True
+        If ``True``, the low-frequency layer is also zlib-compressed before
+        being stored in the returned tuple.  Set to ``False`` to keep it as
+        a raw float32 array (e.g. when the caller handles serialisation
+        externally).  Must match the value passed to :func:`decompress`.
 
     Returns
     -------
@@ -628,7 +634,8 @@ def compress(
         * ``compressed_bytes`` — zlib-compressed int8/int16 residual bytes.
         * ``n`` — tile side length (int).
         * ``q_scale`` — quantisation step size (float).
-        * ``low`` — lossless low-frequency layer as a flat float32 array.
+        * ``low_bytes`` — zlib-compressed float32 low-frequency layer if
+          *force_compress_low* is ``True``, otherwise a raw float32 array.
 
     Raises
     ------
@@ -669,7 +676,12 @@ def compress(
     )
 
     compressed_bytes = zlib.compress(R_q.tobytes(), level=zlib_level)
-    return compressed_bytes, n, q_scale, low.ravel()
+    low_out = (
+        zlib.compress(low.ravel().tobytes(), level=zlib_level)
+        if force_compress_low
+        else low.ravel()
+    )
+    return compressed_bytes, n, q_scale, low_out
 
 
 def decompress(
@@ -677,6 +689,7 @@ def decompress(
     window: int,
     quantize_bits: int = 8,
     downsample_factor: int = 2,
+    force_compress_low: bool = True,
     **kwargs,
 ) -> npt.NDArray[np.float32]:
     """Decompress a tuple produced by :func:`compress`.
@@ -698,6 +711,10 @@ def decompress(
         Quantisation depth — must match compress time.
     downsample_factor : {1, 2, 4}, default 2
         Low-frequency layer reduction factor — must match compress time.
+    force_compress_low : bool, default True
+        Must match the value used at compress time.  When ``True``, the
+        low-frequency layer is decompressed with zlib before use; when
+        ``False``, it is read directly as a float32 array.
     **kwargs
         Accepted for API symmetry; ignored.
 
@@ -722,11 +739,16 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-    compressed_bytes, n, q_scale, low = compressed_data
+    compressed_bytes, n, q_scale, low_data = compressed_data
 
     residual_dtype = np.int8 if quantize_bits == 8 else np.int16
     R_q = np.frombuffer(zlib.decompress(compressed_bytes), dtype=residual_dtype).reshape(n, n)
-    low_2d = np.reshape(low, (n // downsample_factor, n // downsample_factor))
+
+    low_m = n // downsample_factor
+    if force_compress_low:
+        low_2d = np.frombuffer(zlib.decompress(low_data), dtype=np.float32).reshape(low_m, low_m)
+    else:
+        low_2d = np.asarray(low_data, dtype=np.float32).reshape(low_m, low_m)
 
     tile_2d = decode(
         (R_q, n, q_scale, low_2d),
@@ -802,6 +824,7 @@ def compression_info(
     compressed_data: tuple,
     downsample_factor: int,
     original_n: int | None = None,
+    force_compress_low: bool = True,
 ) -> dict:
     """Return size and compression-ratio statistics for a compressed chunk.
 
@@ -858,10 +881,9 @@ def compression_info(
     >>> info["compression_ratio"] > 1.0
     True
     """
-    compressed_bytes, n, q_scale, low = compressed_data
+    compressed_bytes, n, q_scale, low_data = compressed_data
 
-    low_m = n // downsample_factor
-    bytes_low = low_m * low_m * 4  # float32
+    bytes_low = len(low_data) if force_compress_low else np.asarray(low_data).nbytes
     bytes_residual = len(compressed_bytes)
     total_bytes = bytes_residual + bytes_low
 
@@ -873,7 +895,7 @@ def compression_info(
         "n": int(n),
         "downsample_factor": downsample_factor,
         "q_scale": float(q_scale),
-        "low_grid": f"{low_m}x{low_m}",
+        "low_grid": f"{n // downsample_factor}x{n // downsample_factor}",
         "bytes_low_layer": bytes_low,
         "bytes_residual_compressed": bytes_residual,
         "total_bytes": total_bytes,
