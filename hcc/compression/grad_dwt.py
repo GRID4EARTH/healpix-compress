@@ -593,11 +593,13 @@ def decompress(
 
     Returns
     -------
-    numpy.ndarray of shape (n, n), dtype float32
-        Reconstructed 2-D spatial tile.  The output is always 2-D regardless
-        of whether :func:`compress` was called with a 1-D Z-order array or a
-        2-D spatial array.  If you need the Z-order encoding back, call
-        :func:`~hcc.compression.zorder.flatten_tile` on the result.
+    numpy.ndarray, dtype float32
+        Reconstructed chunk in Z-order (Morton) encoding, shape ``(n²,)``.
+        This mirrors the expected input format of :func:`compress`: if you
+        passed a 1-D Z-order array to :func:`compress`, you get a 1-D Z-order
+        array back here.  Pass it to ``_regrid_2d`` (or
+        :func:`~hcc.compression.zorder.expand_tile`) to recover the 2-D
+        spatial tile.
 
     See Also
     --------
@@ -607,12 +609,12 @@ def decompress(
     --------
     >>> import numpy as np
     >>> rng = np.random.default_rng(0)
-    >>> tile = rng.standard_normal((64, 64)).astype(np.float32)
+    >>> chunk = rng.standard_normal(64 * 64).astype(np.float32)
     >>> params = lookup_preset("medium")
-    >>> enc = compress(tile, **params)
+    >>> enc = compress(chunk, **params)
     >>> rec = decompress(enc, **params)
-    >>> rec.shape
-    (64, 64)
+    >>> rec.shape == chunk.shape
+    True
     """
     compressed_bytes, n, q_scale = compressed_data
 
@@ -623,7 +625,8 @@ def decompress(
 
     coeffs_float = coeffs_q.astype(np.float32) * float(q_scale)
     slices = _coeff_slices((n, n), wavelet, levels)
-    return dwt_inverse(coeffs_float, slices, wavelet, levels)
+    tile_2d = dwt_inverse(coeffs_float, slices, wavelet, levels)
+    return flatten_tile(tile_2d)
 
 
 def lookup_preset(
