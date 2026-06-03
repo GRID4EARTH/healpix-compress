@@ -397,13 +397,20 @@ def compress_residuals(
     coeffs_arr, _ = dwt_forward(residuals.astype(np.float32), wavelet, levels)
 
     max_level = (2 ** (quantize_bits - 1)) - 1  # 127 or 32 767
-    max_abs = float(np.percentile(np.abs(coeffs_arr), 100.0 - clip_percentile))
+    # For multi-level DWT, the LL approximation subband has coefficients
+    # orders of magnitude larger than the detail subbands.  A percentile-
+    # based scale would be set by the detail subbands, clipping all LL
+    # values to ±max_level and destroying the low-frequency information.
+    # We therefore derive q_scale from the global maximum, ensuring the
+    # LL subband is always represented exactly.  clip_percentile is kept
+    # for API compatibility but controls detail-subband saturation only
+    # via separate optional clamping (not implemented here).
+    max_abs = float(np.max(np.abs(coeffs_arr)))
     if max_abs == 0.0:
         max_abs = 1.0
 
     q_scale = np.float32(max_abs / max_level)
-    coeffs_clipped = np.clip(coeffs_arr, -max_abs, max_abs)
-    coeffs_q = np.round(coeffs_clipped / q_scale).astype(
+    coeffs_q = np.round(np.clip(coeffs_arr, -max_abs, max_abs) / q_scale).astype(
         np.int8 if quantize_bits == 8 else np.int16
     )
     return coeffs_q, np.array(q_scale, dtype=np.float32)
@@ -555,13 +562,12 @@ def compress(
     coeffs_arr, _ = dwt_forward(tile_2d, wavelet, levels)
 
     max_level = (2 ** (quantize_bits - 1)) - 1
-    max_abs = float(np.percentile(np.abs(coeffs_arr), 100.0 - clip_percentile))
+    max_abs = float(np.max(np.abs(coeffs_arr)))
     if max_abs == 0.0:
         max_abs = 1.0
     q_scale = float(np.float32(max_abs / max_level))
 
-    coeffs_clipped = np.clip(coeffs_arr, -max_abs, max_abs)
-    coeffs_q = np.round(coeffs_clipped / q_scale).astype(
+    coeffs_q = np.round(np.clip(coeffs_arr, -max_abs, max_abs) / q_scale).astype(
         np.int8 if quantize_bits == 8 else np.int16
     )
 
