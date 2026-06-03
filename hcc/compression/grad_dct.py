@@ -1,67 +1,96 @@
 """
-Gradient-residual DCT-style lossy compression for HEALPix tiles.
+Block-DCT lossy compression for HEALPix tile residuals.
 
-This module implements a hierarchical, adaptive-quantisation compressor
-for square float32 arrays stored in Z-order (Morton) encoding.  The
-pipeline follows three broad stages:
+This module implements a hierarchical, adaptive compressor for square float32
+arrays stored in Z-order (Morton) encoding.  The pipeline follows three stages:
 
-1. **Low-frequency layer** – the input is downsampled and stored losslessly.
-2. **Residual coding** – the difference between the original and a bilinear
-   prediction is normalised by a local standard-deviation map, then
-   quantised to int8 or int16.
-3. **Entropy compression** – the quantised residual is compressed with zlib.
+1. **Low-frequency layer** — the input is spatially downsampled and stored
+   losslessly as float32.  The downsampling factor is controlled by
+   ``downsample_factor``.
+2. **DCT residual coding** — the difference between the original data and a
+   bilinear prediction (obtained by upsampling the low-frequency layer) is
+   divided into non-overlapping ``window × window`` blocks.  Each block is
+   transformed with a 2-D DCT-II and the resulting coefficients are uniformly
+   quantised to int8 or int16 with a single global scale factor ``q_scale``.
+3. **Entropy compression** — the quantised coefficient array is compressed
+   with zlib.
+
+This approach mirrors JPEG-style block coding applied to the prediction
+residual: the DCT concentrates residual energy into a small number of
+low-frequency coefficients that quantise efficiently, while high-frequency
+coefficients in smooth residual regions remain near zero and are cheap to
+entropy-code.
 
 Public API
 ----------
-compress : Compress a Z-order HEALPix chunk into a flat byte array.
-decompress : Reconstruct a chunk from its compressed byte array.
+compress : Compress a Z-order HEALPix chunk into a tuple of arrays.
+decompress : Reconstruct a chunk from its compressed representation.
 lookup_preset : Return the parameter dict for a named quality preset.
 compression_info : Report size and compression-ratio statistics.
 
+Lower-level helpers
+-------------------
+dct_blocks : Apply 2-D DCT-II to non-overlapping blocks of a 2-D array.
+idct_blocks : Apply 2-D IDCT-II to non-overlapping blocks and reassemble.
+compress_residuals : Quantise a residual array via block DCT.
+decompress_residuals : Reconstruct a residual array from quantised DCT coefficients.
+downsample : Spatially reduce a square float32 array.
+upsample : Spatially magnify a square float32 array.
+
 Design notes
 ------------
-Algorithm parameters (``window``, ``quantize_bits``, etc.) are **not**
-embedded in the compressed bytes.  They must be passed identically to
-both :func:`compress` and :func:`decompress`, and should be stored in
-the array's metadata document (e.g. ``zarr.json``) by the caller.
+Algorithm parameters (``window``, ``quantize_bits``, ``downsample_factor``)
+are **not** embedded in the compressed bytes.  They must be passed identically
+to both :func:`compress` and :func:`decompress`, and should be stored in the
+array's metadata document (e.g. ``zarr.json``) by the caller.
 
-Only the three data-dependent scalars ``q_lo``, ``q_hi``, and
-``sigma_floor`` — which cannot be recomputed without the original data —
-are stored in the binary header together with ``n`` (the tile side
-length).
+Only two data-dependent values are stored per chunk:
 
-Use :func:`lookup_preset` to resolve a named preset into an explicit
-parameter dict *before* writing; store that dict in the metadata, not
-the preset name.  This guarantees that changing or removing a preset in
-a future version of the library cannot make existing data unreadable.
+* ``n`` — the tile side length (uint32).
+* ``q_scale`` — the uniform quantisation step size (float32).
+
+These are written into the 8-byte binary header for the standalone
+:func:`compress` / :func:`decompress` API, and stored as sidecar scalars
+in the zarr codec path via :func:`compress_residuals` /
+:func:`decompress_residuals`.
+
+Use :func:`lookup_preset` to resolve a named preset into an explicit parameter
+dict *before* writing; store that dict in the metadata, not the preset name.
+This guarantees that changing or removing a preset in a future version of the
+library cannot make existing data unreadable.
 """
 
 import struct
+import zlib
 from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
-from scipy.ndimage import uniform_filter
+from scipy.fft import dctn, idctn
 from scipy.ndimage import zoom as sp_zoom
+
+from hcc.compression.zorder import expand_tile, flatten_tile
 
 __all__ = [
     "compress",
     "decompress",
     "lookup_preset",
     "compression_info",
-    "block_mean_2x2",
+    "dct_blocks",
+    "idct_blocks",
+    "compress_residuals",
+    "decompress_residuals",
     "downsample",
     "upsample",
-    "local_std",
 ]
 
 # ─────────────────────────────────────────────────────────────────
-#  Binary format constants
+#  Binary format constants  (standalone compress / decompress API)
 # ─────────────────────────────────────────────────────────────────
 
-# Little-endian header: uint32 n  +  float32 q_lo, q_hi, sigma_floor
-_HEADER_FMT = "<Ifff"
-_HEADER_BYTES = struct.calcsize(_HEADER_FMT)  # 16 bytes
+# Little-endian header: uint32 n  +  float32 q_scale
+_HEADER_FMT = "<If"
+_HEADER_BYTES = struct.calcsize(_HEADER_FMT)  # 8 bytes
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -74,7 +103,6 @@ _PRESETS: dict[str, dict[str, Any]] = {
         quantize_bits=8,
         clip_percentile=3.0,
         zlib_level=9,
-        sigma_floor_ratio=0.15,
         downsample_factor=4,
     ),
     "medium": dict(
@@ -82,7 +110,6 @@ _PRESETS: dict[str, dict[str, Any]] = {
         quantize_bits=8,
         clip_percentile=0.5,
         zlib_level=9,
-        sigma_floor_ratio=0.05,
         downsample_factor=2,
     ),
     "high": dict(
@@ -90,7 +117,6 @@ _PRESETS: dict[str, dict[str, Any]] = {
         quantize_bits=16,
         clip_percentile=0.1,
         zlib_level=6,
-        sigma_floor_ratio=0.02,
         downsample_factor=2,
     ),
     "ultra": dict(
@@ -98,86 +124,9 @@ _PRESETS: dict[str, dict[str, Any]] = {
         quantize_bits=16,
         clip_percentile=0.02,
         zlib_level=1,
-        sigma_floor_ratio=0.01,
         downsample_factor=1,
     ),
 }
-
-
-# ─────────────────────────────────────────────────────────────────
-#  Internal helpers (Z-order / Morton encoding)
-# ─────────────────────────────────────────────────────────────────
-
-
-def _as_square_array(arr):
-    edge_length = int(np.sqrt(arr.size))
-
-    return np.reshape(arr, (edge_length, edge_length))
-
-
-def _decode_zorder(delta: int):
-    """Decode Z-order (Morton) curve indices into (x, y) coordinate arrays.
-
-    Parameters
-    ----------
-    delta : int
-        Recursion depth; the tile side length is ``2**delta``.
-
-    Returns
-    -------
-    x : numpy.ndarray of shape (4**delta,), dtype uint64
-        Column indices corresponding to each Morton code.
-    y : numpy.ndarray of shape (4**delta,), dtype uint64
-        Row indices corresponding to each Morton code.
-    """
-    size = 4**delta
-    x = np.zeros((size,), dtype="uint64")
-    y = np.zeros((size,), dtype="uint64")
-    code = np.arange(size, dtype="uint64")
-    for bit in range(delta):
-        x |= ((code >> (bit << 1)) & 1) << bit
-        y |= ((code >> ((bit << 1) + 1)) & 1) << bit
-    return x, y
-
-
-def _flatten_tile(data: np.ndarray) -> np.ndarray:
-    """Convert a 2-D tile back to a 1-D Z-order encoded array.
-
-    Parameters
-    ----------
-    data : numpy.ndarray
-        2-D array of shape ``(..., 2**delta, 2**delta)``.
-
-    Returns
-    -------
-    numpy.ndarray
-        1-D array of shape ``(4**delta,)`` in Morton order.
-    """
-    delta = int(np.log(data.size) / np.log(4))
-    x, y = _decode_zorder(delta)
-    return np.squeeze(data[..., x, y])
-
-
-def _expand_tile(data: np.ndarray) -> np.ndarray:
-    """Convert a 1-D Z-order encoded array into a 2-D tile.
-
-    Parameters
-    ----------
-    data : numpy.ndarray
-        Array with last dimension of size ``4**delta`` in Morton order.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array with last two dimensions replaced by ``(2**delta, 2**delta)``.
-    """
-    nside = int(np.sqrt(data.shape[-1]))
-    delta = int(np.log2(nside))
-    x, y = _decode_zorder(delta)
-    shape = (*data.shape[:-1], 2**delta, 2**delta)
-    out = np.empty(shape, dtype=data.dtype)
-    out[..., x, y] = data
-    return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -185,32 +134,7 @@ def _expand_tile(data: np.ndarray) -> np.ndarray:
 # ─────────────────────────────────────────────────────────────────
 
 
-def block_mean_2x2(data: np.ndarray) -> np.ndarray:
-    """Average a square array over non-overlapping 2×2 blocks.
-
-    Parameters
-    ----------
-    data : numpy.ndarray of shape (n, n), dtype float32
-        Input array.  ``n`` must be even.
-
-    Returns
-    -------
-    numpy.ndarray of shape (n//2, n//2), dtype float32
-        Block-averaged output.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> x = np.arange(16, dtype=np.float32).reshape(4, 4)
-    >>> block_mean_2x2(x)
-    array([[ 2.5,  4.5],
-           [10.5, 12.5]], dtype=float32)
-    """
-    n = data.shape[0]
-    return data.reshape(n // 2, 2, n // 2, 2).mean(axis=(1, 3)).astype(np.float32)
-
-
-def downsample(data: np.ndarray, factor: int) -> np.ndarray:
+def downsample(data: npt.NDArray[np.float32], factor: int) -> npt.NDArray[np.float32]:
     """Downsample a square array by an integer factor.
 
     Parameters
@@ -220,28 +144,31 @@ def downsample(data: np.ndarray, factor: int) -> np.ndarray:
     factor : {1, 2, 4}
         Spatial reduction factor.
 
-        * ``1`` – returns a float32 copy without modification.
-        * ``2`` – applies :func:`block_mean_2x2` (exact block average).
-        * ``4`` – applies bilinear downsampling via ``scipy.ndimage.zoom``.
+        * ``1`` — returns a float32 copy without modification.
+        * ``2`` — exact 2×2 block average.
+        * ``4`` — bilinear downsampling via :func:`scipy.ndimage.zoom`.
 
     Returns
     -------
     numpy.ndarray of shape (n//factor, n//factor), dtype float32
-        Downsampled array.
 
     See Also
     --------
-    upsample : Inverse operation (bilinear interpolation).
-    block_mean_2x2 : Block-averaging primitive used when *factor* = 2.
+    upsample : Inverse operation.
     """
     if factor == 1:
         return data.astype(np.float32).copy()
     if factor == 2:
-        return block_mean_2x2(data)
+        n = data.shape[0]
+        return (
+            data.reshape(n // 2, 2, n // 2, 2)
+            .mean(axis=(1, 3))
+            .astype(np.float32)
+        )
     return sp_zoom(data.astype(np.float64), 1.0 / factor, order=1).astype(np.float32)
 
 
-def upsample(data: np.ndarray, factor: int) -> np.ndarray:
+def upsample(data: npt.NDArray[np.float32], factor: int) -> npt.NDArray[np.float32]:
     """Upsample a square array by an integer factor using bilinear interpolation.
 
     Parameters
@@ -251,13 +178,12 @@ def upsample(data: np.ndarray, factor: int) -> np.ndarray:
     factor : {1, 2, 4}
         Spatial magnification factor.
 
-        * ``1`` – returns a float32 copy without modification.
-        * ``2`` or ``4`` – bilinear interpolation via ``scipy.ndimage.zoom``.
+        * ``1`` — returns a float32 copy without modification.
+        * ``2`` or ``4`` — bilinear interpolation via :func:`scipy.ndimage.zoom`.
 
     Returns
     -------
     numpy.ndarray of shape (m*factor, m*factor), dtype float32
-        Upsampled array.
 
     See Also
     --------
@@ -268,36 +194,260 @@ def upsample(data: np.ndarray, factor: int) -> np.ndarray:
     return sp_zoom(data.astype(np.float64), factor, order=1).astype(np.float32)
 
 
-def local_std(data: np.ndarray, window: int = 8) -> np.ndarray:
-    """Compute a local standard-deviation map using a uniform sliding window.
+# ─────────────────────────────────────────────────────────────────
+#  DCT block primitives
+# ─────────────────────────────────────────────────────────────────
 
-    Uses the identity ``Var(X) = E[X²] − E[X]²`` to compute the map in
-    O(n) time via two calls to :func:`scipy.ndimage.uniform_filter`.
+
+def dct_blocks(data: npt.NDArray[np.float32], block_size: int) -> npt.NDArray[np.float64]:
+    """Apply a 2-D DCT-II to each non-overlapping square block of *data*.
+
+    The array is partitioned into ``(n // block_size) ** 2`` non-overlapping
+    blocks of shape ``(block_size, block_size)``.  A 2-D DCT-II with
+    orthonormal (``norm='ortho'``) normalisation is applied independently to
+    each block.  The coefficients are returned in the same spatial layout as
+    the input: coefficient ``[r, c]`` within the block at grid position
+    ``(i, j)`` is stored at output index
+    ``[i * block_size + r, j * block_size + c]``.
 
     Parameters
     ----------
     data : numpy.ndarray of shape (n, n)
-        Input array (any floating-point dtype; internally cast to float64).
-    window : int, optional
-        Side length of the square averaging window, by default 8.
-        Larger values produce a smoother sigma map.
+        Input array.  *n* must be a positive integer multiple of *block_size*.
+    block_size : int
+        Side length of each square DCT block.  Typical values: 4, 8, 16.
+
+    Returns
+    -------
+    numpy.ndarray of shape (n, n), dtype float64
+        DCT-II coefficients in block-spatial layout.
+
+    Raises
+    ------
+    ValueError
+        If *n* is not divisible by *block_size*.
+
+    See Also
+    --------
+    idct_blocks : Exact inverse of this function.
+
+    Notes
+    -----
+    The (0, 0) coefficient of each block is the block mean scaled by
+    ``block_size`` (because of the orthonormal normalisation).  Smooth
+    residual blocks therefore concentrate their energy in the DC coefficient
+    and a few low-frequency AC terms.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> x = np.ones((8, 8), dtype=np.float32)
+    >>> c = dct_blocks(x, block_size=4)
+    >>> c.shape
+    (8, 8)
+    >>> # DC coefficient of each block equals block_size (ortho norm of constant)
+    >>> float(round(c[0, 0], 6))
+    2.0
+    """
+    n = data.shape[0]
+    if n % block_size != 0:
+        raise ValueError(
+            f"Array size {n} is not divisible by block_size {block_size}."
+        )
+    nb = n // block_size  # number of blocks per spatial dimension
+
+    # Reshape (n, n) → (nb, block_size, nb, block_size), then
+    # transpose to (nb, nb, block_size, block_size) so that
+    # blocks[i, j] is the (i, j)-th block.
+    blocks = (
+        data.reshape(nb, block_size, nb, block_size)
+        .transpose(0, 2, 1, 3)
+    )
+
+    # Apply 2-D DCT on the last two axes (within each block).
+    coeffs = dctn(blocks, axes=(-2, -1), norm="ortho")
+
+    # Transpose back and reshape to (n, n) to preserve spatial layout.
+    return coeffs.transpose(0, 2, 1, 3).reshape(n, n)
+
+
+def idct_blocks(coeffs: npt.NDArray, block_size: int) -> npt.NDArray[np.float64]:
+    """Apply a 2-D IDCT-II to each non-overlapping block and reassemble.
+
+    This is the exact inverse of :func:`dct_blocks`: applying
+    ``idct_blocks(dct_blocks(x, b), b)`` recovers *x* up to floating-point
+    rounding.
+
+    Parameters
+    ----------
+    coeffs : numpy.ndarray of shape (n, n)
+        DCT-II coefficient array as produced by :func:`dct_blocks`.
+        *n* must be divisible by *block_size*.
+    block_size : int
+        Side length of each square block — must match the value used
+        when calling :func:`dct_blocks`.
+
+    Returns
+    -------
+    numpy.ndarray of shape (n, n), dtype float64
+        Reconstructed spatial-domain array.
+
+    See Also
+    --------
+    dct_blocks : Forward transform.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> x = rng.standard_normal((8, 8)).astype(np.float32)
+    >>> np.allclose(x, idct_blocks(dct_blocks(x, 4), 4), atol=1e-5)
+    True
+    """
+    n = coeffs.shape[0]
+    nb = n // block_size
+
+    blocks = coeffs.reshape(nb, block_size, nb, block_size).transpose(0, 2, 1, 3)
+    reconstructed = idctn(blocks, axes=(-2, -1), norm="ortho")
+    return reconstructed.transpose(0, 2, 1, 3).reshape(n, n)
+
+
+# ─────────────────────────────────────────────────────────────────
+#  Residual codec  (used by the zarr ArrayArrayCodec layer)
+# ─────────────────────────────────────────────────────────────────
+
+
+def compress_residuals(
+    residuals: npt.NDArray[np.float32],
+    prediction: npt.NDArray[np.float32],
+    window: int,
+    quantize_bits: int,
+    clip_percentile: float,
+) -> tuple[npt.NDArray[np.integer], npt.NDArray[np.float32]]:
+    """Compress a residual array using block DCT and uniform quantisation.
+
+    The residual is partitioned into non-overlapping ``window × window``
+    blocks.  A 2-D DCT-II is applied to each block, and the resulting
+    coefficients are uniformly quantised to int8 or int16 using a single
+    global scale factor ``q_scale`` derived from the coefficient distribution.
+
+    Parameters
+    ----------
+    residuals : numpy.ndarray of shape (n, n), dtype float32
+        Residual signal ``original − bilinear_prediction``.
+    prediction : numpy.ndarray of shape (n, n), dtype float32
+        Bilinear prediction used to produce *residuals*.  Passed here for
+        API symmetry with :func:`decompress_residuals` but not used by this
+        function.
+    window : int
+        DCT block side length.  Must divide *n* evenly.  Typical values:
+        4, 8, 16.
+    quantize_bits : {8, 16}
+        Quantisation depth.
+
+        * ``8``  → ``int8``, 254 usable levels (±127), 1 byte per coefficient.
+        * ``16`` → ``int16``, 65 534 usable levels (±32 767), 2 bytes per
+          coefficient.
+    clip_percentile : float
+        Symmetric tail percentile used to determine ``q_scale``.
+        ``q_scale`` is set so that the ``(100 − clip_percentile)``-th
+        percentile of the absolute DCT coefficients maps to the maximum
+        quantised level.  A larger value allows more saturation of large
+        coefficients in exchange for finer resolution of the majority.
+        Typical range: 0.02–5.0.
+
+    Returns
+    -------
+    residuals_q : numpy.ndarray of shape (n, n), dtype int8 or int16
+        Quantised DCT coefficients in block-spatial layout (same spatial
+        ordering as *residuals*; coefficient ``[r, c]`` of block ``(i, j)``
+        is at index ``[i*window + r, j*window + c]``).
+    q_scale : numpy.ndarray of shape (), dtype float32
+        Scalar quantisation step size.  Must be stored as metadata and
+        passed to :func:`decompress_residuals` to reconstruct the residual.
+
+    See Also
+    --------
+    decompress_residuals : Inverse of this function.
+    dct_blocks : 2-D block DCT primitive.
+
+    Notes
+    -----
+    Uniform quantisation is chosen because the residual DCT coefficients of
+    a prediction error tend to be sparse and concentrated near zero, making
+    the distribution relatively uniform within the quantisation range.
+    A single ``q_scale`` scalar is sufficient to reconstruct the signal,
+    which minimises per-chunk metadata overhead.
+    """
+    # Transform residuals to DCT domain, block by block.
+    coeffs = dct_blocks(residuals.astype(np.float32), block_size=window)
+
+    # Derive quantisation scale from the coefficient distribution.
+    # max_abs is the (100 - clip_percentile)-th percentile of |coeffs|,
+    # so clip_percentile % of coefficients will saturate (be clipped).
+    max_level = (2 ** (quantize_bits - 1)) - 1  # 127 or 32 767
+    abs_coeffs = np.abs(coeffs)
+    max_abs = float(np.percentile(abs_coeffs, 100.0 - clip_percentile))
+
+    # Guard against a near-zero residual (e.g. perfectly flat tile).
+    if max_abs == 0.0:
+        max_abs = 1.0
+
+    q_scale = np.float32(max_abs / max_level)
+
+    # Clip and round to integer levels in the symmetric range [−max_level, +max_level].
+    coeffs_clipped = np.clip(coeffs, -max_abs, max_abs)
+    coeffs_int = np.round(coeffs_clipped / q_scale).astype(
+        np.int8 if quantize_bits == 8 else np.int16
+    )
+
+    return coeffs_int, np.array(q_scale, dtype=np.float32)
+
+
+def decompress_residuals(
+    compressed: npt.NDArray[np.integer],
+    prediction: npt.NDArray[np.float32],
+    q_scale: npt.NDArray[np.float32],
+    *,
+    window: int,
+    quantize_bits: int,
+) -> npt.NDArray[np.float32]:
+    """Reconstruct a residual array from quantised DCT coefficients.
+
+    This is the inverse of :func:`compress_residuals`.
+
+    Parameters
+    ----------
+    compressed : numpy.ndarray of shape (n, n), dtype int8 or int16
+        Quantised DCT coefficients in block-spatial layout, as returned by
+        :func:`compress_residuals`.
+    prediction : numpy.ndarray of shape (n, n), dtype float32
+        Bilinear prediction.  Passed here for API symmetry but not used by
+        this function; the spatial context is not needed for IDCT-based
+        reconstruction.
+    q_scale : numpy.ndarray of shape () or (1,), dtype float32
+        Quantisation step size returned by :func:`compress_residuals`.
+    window : int
+        DCT block side length — must match the value used at compress time.
+    quantize_bits : {8, 16}
+        Quantisation depth — must match the value used at compress time.
+        (Not used directly here; kept for API symmetry.)
 
     Returns
     -------
     numpy.ndarray of shape (n, n), dtype float32
-        Per-pixel local standard deviation, clipped to zero from below to
-        avoid numerical negatives from floating-point cancellation.
+        Reconstructed residual array.
 
-    Notes
-    -----
-    The uniform filter is applied with default boundary conditions
-    (``mode='reflect'``), which may introduce mild edge artefacts for
-    very large *window* values relative to the array size.
+    See Also
+    --------
+    compress_residuals : Inverse of this function.
+    idct_blocks : 2-D block IDCT primitive.
     """
-    f = data.astype(np.float64)
-    mu = uniform_filter(f, size=window)
-    mu2 = uniform_filter(f**2, size=window)
-    return np.sqrt(np.maximum(mu2 - mu**2, 0)).astype(np.float32)
+    # Dequantise: scale integer levels back to float coefficients.
+    coeffs = compressed.astype(np.float32) * float(q_scale)
+
+    # Apply inverse DCT block by block and cast back to float32.
+    return idct_blocks(coeffs, block_size=window).astype(np.float32)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -306,49 +456,42 @@ def local_std(data: np.ndarray, window: int = 8) -> np.ndarray:
 
 
 def encode(
-    data: np.ndarray,
+    data: npt.NDArray[np.float32],
     window: int,
     quantize_bits: int,
     clip_percentile: float,
-    sigma_floor_ratio: float,
     downsample_factor: int,
-) -> tuple:
+) -> tuple[npt.NDArray[np.integer], int, float, npt.NDArray[np.float32]]:
     """Encode a square 2-D float32 tile into a tuple of arrays.
 
-    This is an internal function.  Prefer :func:`compress` for external use.
-
-    Entropy compression (zlib) is intentionally absent here so that the
-    zarr codec layer can handle serialisation independently.
+    This is an internal function.  For external use prefer :func:`compress`.
+    Entropy compression (zlib) is intentionally absent so that the zarr
+    codec layer can handle serialisation independently.
 
     Parameters
     ----------
     data : numpy.ndarray of shape (n, n), dtype float32
         Square 2-D input tile.
     window : int
-        Uniform-filter window size for :func:`local_std`.
+        DCT block side length.
     quantize_bits : {8, 16}
-        Residual quantisation depth.
+        Quantisation depth.
     clip_percentile : float
-        Symmetric percentile for residual clipping before quantisation.
-    sigma_floor_ratio : float
-        Minimum sigma expressed as a fraction of ``std(R)``.
+        Tail percentile for ``q_scale`` derivation (see
+        :func:`compress_residuals`).
     downsample_factor : {1, 2, 4}
         Spatial reduction factor for the low-frequency layer.
 
     Returns
     -------
-    R_q : numpy.ndarray
-        Quantised normalised residuals of shape (n, n), dtype int8 or int16.
+    R_q : numpy.ndarray of shape (n, n), dtype int8 or int16
+        Quantised DCT coefficients.
     n : int
         Tile side length.
-    q_lo : float
-        Lower quantisation bound.
-    q_hi : float
-        Upper quantisation bound.
-    sigma_floor : float
-        Variance normalisation floor.
-    low : numpy.ndarray
-        Low-frequency layer of shape (n//downsample_factor, n//downsample_factor), dtype float32
+    q_scale : float
+        Quantisation step size.
+    low : numpy.ndarray of shape (n//downsample_factor, n//downsample_factor), dtype float32
+        Lossless low-frequency layer.
 
     See Also
     --------
@@ -356,103 +499,27 @@ def encode(
     compress : Public API — adds Z-order conversion, zlib, and binary packing.
     """
     data = data.astype(np.float32)
-    n = np.array(data.shape[0], dtype="uint64")
+    n = int(data.shape[0])
 
-    # 1. Low-frequency layer
+    # 1. Low-frequency layer (lossless).
     low = downsample(data, factor=downsample_factor)
 
-    # 2. Prediction via bilinear upsampling
+    # 2. Bilinear prediction from the low-frequency layer.
     pred = upsample(low, factor=downsample_factor)
 
-    # 3. Residual
+    # 3. Residual.
     R = data - pred
 
-    # 4. Local variance map
-    #    sigma(x,y) ~ local activity in the prediction:
-    #    smooth regions -> low sigma -> small expected residual
-    #    active regions -> high sigma -> large expected residual
-    sigma = local_std(pred, window=window)
-    sigma_floor = np.std(R) * sigma_floor_ratio
-    sigma = np.maximum(sigma, sigma_floor)
+    # 4. Block-DCT quantisation of the residual.
+    R_q, q_scale_arr = compress_residuals(
+        R,
+        prediction=pred,
+        window=window,
+        quantize_bits=quantize_bits,
+        clip_percentile=clip_percentile,
+    )
 
-    # 5. Adaptive variance normalisation (whitens the signal)
-    R_norm = (R / sigma).astype(np.float32)
-
-    # 6. Quantisation
-    n_levels = 2**quantize_bits  # 256 or 65 536
-    half = n_levels // 2  # 128 or 32 768
-
-    q_lo = np.percentile(R_norm, clip_percentile)
-    q_hi = np.percentile(R_norm, 100.0 - clip_percentile)
-    scale = (q_hi - q_lo) / (n_levels - 1)
-
-    R_clipped = np.clip(R_norm, q_lo, q_hi)
-    R_int = np.round((R_clipped - q_lo) / scale - half)
-
-    R_q = R_int.astype(np.int8 if quantize_bits == 8 else np.int16)
-
-    return (np.ravel(R_q), n, q_lo, q_hi, sigma_floor, np.ravel(low))
-
-
-def compress_residuals(
-    residuals: npt.NDArray[np.float32],
-    prediction: npt.NDArray[np.float32],
-    window: int,
-    quantize_bits: int,
-    sigma_floor_ratio: float,
-    clip_percentile: float,
-) -> tuple[
-    npt.NDArray[np.integer],
-    npt.NDArray[np.float32],
-    npt.NDArray[np.float32],
-    npt.NDArray[np.float32],
-]:
-    # 1. Local variance map
-    #    sigma(x,y) ~ local activity in the prediction:
-    #    smooth regions -> low sigma -> small expected residual
-    #    active regions -> high sigma -> large expected residual
-    sigma = local_std(prediction, window=window)
-    sigma_floor = np.std(residuals) * residuals.dtype.type(sigma_floor_ratio)
-    sigma = np.maximum(sigma, sigma_floor)
-
-    # 2. Adaptive variance normalisation (whitens the signal)
-    residuals_norm = (residuals / sigma).astype(np.float32)
-
-    # 3. Quantisation
-    n_levels = 2**quantize_bits  # 256 or 65 536
-    half = n_levels // 2  # 128 or 32 768
-
-    q_lo = np.percentile(residuals_norm, clip_percentile)
-    q_hi = np.percentile(residuals_norm, 100.0 - clip_percentile)
-    scale = (q_hi - q_lo) / (n_levels - 1)
-
-    residuals_clipped = np.clip(residuals_norm, q_lo, q_hi)
-    residuals_int = np.round((residuals_clipped - q_lo) / scale - half)
-
-    residuals_q = residuals_int.astype(np.int8 if quantize_bits == 8 else np.int16)
-
-    return residuals_q, q_lo, q_hi, sigma_floor
-
-
-def decompress_residuals(
-    compressed: npt.NDArray[np.integer],
-    prediction: npt.NDArray[np.float32],
-    q_lo: npt.NDArray[np.float32],
-    q_hi: npt.NDArray[np.float32],
-    sigma_floor: npt.NDArray[np.float32],
-    *,
-    window: int,
-    quantize_bits: int,
-) -> npt.NDArray[np.float32]:
-    sigma = local_std(prediction, window=window)
-    sigma = np.maximum(sigma, sigma_floor)
-
-    n_levels = 2**quantize_bits
-    half = n_levels // 2
-
-    # Dequantisation + variance denormalisation
-    scale = (q_hi - q_lo) / (n_levels - 1)
-    return ((compressed.astype(np.float32) + half) * scale + q_lo) * sigma
+    return R_q, n, float(q_scale_arr), low
 
 
 def decode(
@@ -460,54 +527,45 @@ def decode(
     window: int,
     quantize_bits: int,
     downsample_factor: int,
-) -> np.ndarray:
+) -> npt.NDArray[np.float32]:
     """Reconstruct a 2-D float32 tile from a tuple produced by :func:`encode`.
 
-    This is an internal function.  Prefer :func:`decompress` for external use.
+    This is an internal function.  For external use prefer :func:`decompress`.
 
     Parameters
     ----------
     encoded : tuple
-        ``(R_q, n, q_lo, q_hi, sigma_floor, low)`` as returned by
-        :func:`encode`.
+        ``(R_q, n, q_scale, low)`` as returned by :func:`encode`.
     window : int
-        Uniform-filter window size — must match the value used at encode time.
+        DCT block side length — must match the value used at encode time.
     quantize_bits : {8, 16}
-        Residual quantisation depth — must match the value used at encode time.
+        Quantisation depth — must match encode time.
     downsample_factor : {1, 2, 4}
-        Low-frequency layer reduction factor — must match encode time.
+        Low-frequency reduction factor — must match encode time.
 
     Returns
     -------
     numpy.ndarray of shape (n, n), dtype float32
         Reconstructed 2-D tile.
 
-    Notes
-    -----
-    The sigma map is not stored in the tuple; it is recomputed
-    deterministically from the low-frequency layer at decode time.
-
     See Also
     --------
-    encode : Inverse of this function.
+    encode : Forward transform.
     decompress : Public API — adds Z-order conversion and binary unpacking.
     """
-    R_q, n, q_lo, q_hi, sigma_floor, low = encoded
+    R_q, n, q_scale, low = encoded
 
-    R_q = _as_square_array(R_q)
-    low = _as_square_array(low)
+    # Reconstruct prediction from the low-frequency layer.
+    pred = upsample(np.reshape(low, (int(n) // downsample_factor, int(n) // downsample_factor)), factor=downsample_factor)
 
-    # Reconstruct prediction and sigma map
-    pred = upsample(low, factor=downsample_factor)
-    sigma = local_std(pred, window=window)
-    sigma = np.maximum(sigma, sigma_floor)
-
-    n_levels = 2**quantize_bits
-    half = n_levels // 2
-
-    # Dequantisation + variance denormalisation
-    scale = (q_hi - q_lo) / (n_levels - 1)
-    R = ((R_q.astype(np.float32) + half) * scale + q_lo) * sigma
+    # Dequantise and apply IDCT.
+    R = decompress_residuals(
+        np.reshape(R_q, (n, n)),
+        prediction=pred,
+        q_scale=np.float32(q_scale),
+        window=window,
+        quantize_bits=quantize_bits,
+    )
 
     return pred + R
 
@@ -518,14 +576,18 @@ def decode(
 
 
 def compress(
-    data: np.ndarray,
+    data: npt.NDArray[np.float32],
     window: int,
     quantize_bits: int = 8,
     clip_percentile: float = 0.5,
-    sigma_floor_ratio: float = 0.05,
     downsample_factor: int = 2,
-) -> tuple[np.ndarray, ...]:
-    """Compress a HEALPix chunk stored in Z-order into a flat byte array.
+    zlib_level: int = 9,
+) -> tuple:
+    """Compress a HEALPix chunk stored in Z-order into a tuple of arrays.
+
+    The Z-order (Morton) input is first expanded to a 2-D square grid,
+    compressed via :func:`encode` (low-frequency layer + block-DCT residual),
+    then the quantised residual is zlib-compressed.
 
     Parameters are **not** embedded in the returned bytes.  The caller is
     responsible for storing them (e.g. in ``zarr.json``) and passing them
@@ -535,53 +597,44 @@ def compress(
     Parameters
     ----------
     data : numpy.ndarray
-        1-D (or batched) array in Z-order (Morton) encoding, as stored in
-        HEALPix NESTED scheme tiles, dtype float32.
+        1-D array in Z-order (Morton) encoding, as stored in HEALPix NESTED
+        scheme tiles, dtype float32.
     window : int
-        Side length of the uniform window used by :func:`local_std` to
-        build the local standard-deviation map.  Typical range: 4–32.
-        Larger values produce smoother sigma maps.
-    quantize_bits : {8, 16}, default: 8
-        Bit depth of the quantised residual.
+        DCT block side length.  Must divide the tile side length *n* evenly.
+        Typical values: 4, 8, 16.
+    quantize_bits : {8, 16}, default 8
+        Quantisation depth.
 
-        * ``8``  → ``int8``,  256 levels, 1 byte per pixel.
-        * ``16`` → ``int16``, 65 536 levels, 2 bytes per pixel.
-    clip_percentile : float, default: 0.5
-        Symmetric percentile used to define the quantisation range. The residual
-        is clipped to ``[percentile(p), percentile(100−p)]`` before
-        quantisation. Higher values improve entropy compression at the cost of
-        larger reconstruction error in the tails. Typical range: 0.05–5.0.
-    sigma_floor_ratio : float, default: 0.05
-        Minimum sigma expressed as a fraction of ``std(R)``.
-        Prevents division by near-zero sigma in flat regions.
-        Typical range: 0.005–0.20.
-    downsample_factor : {1, 2, 4}, default: 2
-        Spatial reduction factor for the low-frequency layer.
+        * ``8``  → int8, 254 usable levels, 1 byte per coefficient.
+        * ``16`` → int16, 65 534 usable levels, 2 bytes per coefficient.
+    clip_percentile : float, default 0.5
+        Symmetric tail percentile for ``q_scale`` derivation.  A larger
+        value allows more saturation in exchange for finer resolution of
+        the majority of coefficients.  Typical range: 0.02–5.0.
+    downsample_factor : {1, 2, 4}, default 2
+        Spatial reduction factor for the lossless low-frequency layer.
 
-        * ``1`` – full-resolution low layer (lossless low frequencies).
-        * ``2`` – layer at half resolution; recommended default.
-        * ``4`` – layer at quarter resolution; smallest file, most loss.
+        * ``1`` — full-resolution (lossless low frequencies).
+        * ``2`` — half resolution; recommended default.
+        * ``4`` — quarter resolution; smallest file, most loss.
+    zlib_level : int, default 9
+        zlib compression level for the quantised residual (0–9).
 
     Returns
     -------
-    R_q : numpy.ndarray
-        Quantised normalised residuals of shape (n, n), dtype int8 or int16.
-    n : int
-        Tile side length.
-    q_lo : float
-        Lower quantisation bound.
-    q_hi : float
-        Upper quantisation bound.
-    sigma_floor : float
-        Variance normalisation floor.
-    low : numpy.ndarray
-        Low-frequency layer of shape (n//downsample_factor, n//downsample_factor), dtype float32
+    tuple
+        ``(compressed_bytes, n, q_scale, low)`` where:
+
+        * ``compressed_bytes`` — zlib-compressed int8/int16 residual bytes.
+        * ``n`` — tile side length (int).
+        * ``q_scale`` — quantisation step size (float).
+        * ``low`` — lossless low-frequency layer as a flat float32 array.
 
     Raises
     ------
     ValueError
         If *quantize_bits* or *downsample_factor* are not in their allowed
-        sets, or if *clip_percentile* or *sigma_floor_ratio* are out of range.
+        sets, or if *clip_percentile* is out of range.
 
     See Also
     --------
@@ -591,65 +644,62 @@ def compress(
 
     Examples
     --------
-    Compress using parameters from a preset:
-
     >>> import numpy as np
     >>> rng = np.random.default_rng(0)
     >>> chunk = rng.standard_normal(64 * 64).astype(np.float32)
-    >>> params = lookup_preset("high")
+    >>> params = lookup_preset("medium")
     >>> enc = compress(chunk, **params)
-    >>> isinstance(enc, np.ndarray) and enc.dtype == np.uint8
+    >>> isinstance(enc, tuple)
     True
-
-    Compress with explicit parameters:
-
-    >>> enc = compress(chunk, window=8, quantize_bits=16, downsample_factor=2)
     """
     if quantize_bits not in (8, 16):
         raise ValueError("quantize_bits must be 8 or 16")
     if downsample_factor not in (1, 2, 4):
         raise ValueError("downsample_factor must be 1, 2 or 4")
-    if not (0.005 <= sigma_floor_ratio <= 0.5):
-        raise ValueError("sigma_floor_ratio out of range [0.005, 0.5]")
     if not (0.0 < clip_percentile < 50.0):
-        raise ValueError("clip_percentile out of range (0, 50)")
+        raise ValueError("clip_percentile must be in the open interval (0, 50)")
 
-    tile_2d = _expand_tile(data.astype(np.float32))
-    return encode(
+    tile_2d = expand_tile(data.astype(np.float32))
+    R_q, n, q_scale, low = encode(
         tile_2d,
-        window,
-        quantize_bits,
-        clip_percentile,
-        sigma_floor_ratio,
-        downsample_factor,
+        window=window,
+        quantize_bits=quantize_bits,
+        clip_percentile=clip_percentile,
+        downsample_factor=downsample_factor,
     )
+
+    compressed_bytes = zlib.compress(R_q.tobytes(), level=zlib_level)
+    return compressed_bytes, n, q_scale, low.ravel()
 
 
 def decompress(
-    compressed_data: tuple[np.ndarray, ...],
+    compressed_data: tuple,
     window: int,
     quantize_bits: int = 8,
     downsample_factor: int = 2,
-) -> np.ndarray:
-    """Decompress a byte array produced by :func:`compress`.
+    **kwargs,
+) -> npt.NDArray[np.float32]:
+    """Decompress a tuple produced by :func:`compress`.
 
-    The parameter signature mirrors :func:`compress` so that a codec can
-    pass the same metadata dict to both functions.  Only *window*,
-    *quantize_bits*, and *downsample_factor* are required for decoding;
-    the remaining arguments are accepted for API symmetry but are not used.
+    The parameter signature mirrors :func:`compress` so that a codec can pass
+    the same metadata dict to both functions.  Only *window*, *quantize_bits*,
+    and *downsample_factor* are required for decoding; any extra keyword
+    arguments (e.g. ``clip_percentile``, ``zlib_level``) are accepted but
+    ignored for API symmetry.
 
     Parameters
     ----------
-    compressed_data : tuple of numpy.ndarray
-        Compressed component arrays as returned by :func:`compress`.
+    compressed_data : tuple
+        ``(compressed_bytes, n, q_scale, low)`` as returned by
+        :func:`compress`.
     window : int
-        Uniform-filter window size — must match the value used at
-        compress time.
-    quantize_bits : {8, 16}, default: 8
-        Residual quantisation depth — must match compress time, by default 8.
-    downsample_factor : {1, 2, 4}, default: 2
-        Low-frequency layer reduction factor — must match compress time,
-        by default 2.
+        DCT block side length — must match compress time.
+    quantize_bits : {8, 16}, default 8
+        Quantisation depth — must match compress time.
+    downsample_factor : {1, 2, 4}, default 2
+        Low-frequency layer reduction factor — must match compress time.
+    **kwargs
+        Accepted for API symmetry; ignored.
 
     Returns
     -------
@@ -672,34 +722,45 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-    tile_2d = decode(compressed_data, window, quantize_bits, downsample_factor)
+    compressed_bytes, n, q_scale, low = compressed_data
 
-    return _flatten_tile(tile_2d)
+    residual_dtype = np.int8 if quantize_bits == 8 else np.int16
+    R_q = np.frombuffer(zlib.decompress(compressed_bytes), dtype=residual_dtype).reshape(n, n)
+    low_2d = np.reshape(low, (n // downsample_factor, n // downsample_factor))
+
+    tile_2d = decode(
+        (R_q, n, q_scale, low_2d),
+        window=window,
+        quantize_bits=quantize_bits,
+        downsample_factor=downsample_factor,
+    )
+
+    return flatten_tile(tile_2d)
 
 
 def lookup_preset(name: Literal["low", "medium", "high", "ultra"]) -> dict[str, Any]:
     """Return a copy of the parameter dict for a named quality preset.
 
-    Resolve the preset *before* writing and store the returned dict (not
-    the preset name) in the array metadata.  This guarantees that future
-    changes to preset values cannot affect the readability of existing data.
+    Resolve the preset *before* writing and store the returned dict (not the
+    preset name) in the array metadata.  This guarantees that future changes
+    to preset values cannot affect the readability of existing data.
 
     Parameters
     ----------
     name : {'low', 'medium', 'high', 'ultra'}
         Name of the preset to look up.
 
-        +----------+--------+---------------+------------------+------------+--------------------+-------------------+
-        | name     | window | quantize_bits | clip_percentile  | zlib_level | sigma_floor_ratio  | downsample_factor |
-        +==========+========+===============+==================+============+====================+===================+
-        | low      | 4      | 8             | 3.0              | 9          | 0.15               | 4                 |
-        +----------+--------+---------------+------------------+------------+--------------------+-------------------+
-        | medium   | 8      | 8             | 0.5              | 9          | 0.05               | 2                 |
-        +----------+--------+---------------+------------------+------------+--------------------+-------------------+
-        | high     | 8      | 16            | 0.1              | 6          | 0.02               | 2                 |
-        +----------+--------+---------------+------------------+------------+--------------------+-------------------+
-        | ultra    | 16     | 16            | 0.02             | 1          | 0.01               | 1                 |
-        +----------+--------+---------------+------------------+------------+--------------------+-------------------+
+        +----------+--------+---------------+-----------------+------------+-------------------+
+        | name     | window | quantize_bits | clip_percentile | zlib_level | downsample_factor |
+        +==========+========+===============+=================+============+===================+
+        | low      | 4      | 8             | 3.0             | 9          | 4                 |
+        +----------+--------+---------------+-----------------+------------+-------------------+
+        | medium   | 8      | 8             | 0.5             | 9          | 2                 |
+        +----------+--------+---------------+-----------------+------------+-------------------+
+        | high     | 8      | 16            | 0.1             | 6          | 2                 |
+        +----------+--------+---------------+-----------------+------------+-------------------+
+        | ultra    | 16     | 16            | 0.02            | 1          | 1                 |
+        +----------+--------+---------------+-----------------+------------+-------------------+
 
     Returns
     -------
@@ -721,7 +782,7 @@ def lookup_preset(name: Literal["low", "medium", "high", "ultra"]) -> dict[str, 
     --------
     >>> params = lookup_preset("high")
     >>> sorted(params.keys())
-    ['clip_percentile', 'downsample_factor', 'quantize_bits', 'sigma_floor_ratio', 'window', 'zlib_level']
+    ['clip_percentile', 'downsample_factor', 'quantize_bits', 'window', 'zlib_level']
     >>> params["quantize_bits"]
     16
     """
@@ -738,7 +799,7 @@ def lookup_preset(name: Literal["low", "medium", "high", "ultra"]) -> dict[str, 
 
 
 def compression_info(
-    binary_data: np.ndarray,
+    compressed_data: tuple,
     downsample_factor: int,
     original_n: int | None = None,
 ) -> dict:
@@ -746,14 +807,15 @@ def compression_info(
 
     Parameters
     ----------
-    binary_data : numpy.ndarray of dtype uint8
-        Compressed byte array as returned by :func:`compress`.
+    compressed_data : tuple
+        ``(compressed_bytes, n, q_scale, low)`` as returned by
+        :func:`compress`.
     downsample_factor : {1, 2, 4}
-        The downsampling factor used when compressing — needed to compute
-        the size of the low-frequency layer embedded in the binary.
+        The downsampling factor used at compress time — needed to compute
+        the size of the low-frequency layer.
     original_n : int or None, optional
         Side length of the original square tile in pixels.  When ``None``,
-        inferred from the ``n`` field in the binary header.
+        inferred from *n* in *compressed_data*.
 
     Returns
     -------
@@ -761,19 +823,19 @@ def compression_info(
         Dictionary with the following keys:
 
         ``n`` : int
-            Tile side length read from the binary header.
+            Tile side length.
         ``downsample_factor`` : int
-            Downsampling factor passed as argument.
+            Downsampling factor.
+        ``q_scale`` : float
+            Quantisation step size.
         ``low_grid`` : str
             Shape of the embedded low-frequency layer as ``"m×m"``.
-        ``bytes_header`` : int
-            Fixed header size in bytes (always 16).
         ``bytes_low_layer`` : int
-            Size of the embedded low-frequency layer in bytes (float32).
+            Size of the low-frequency layer in bytes (float32).
         ``bytes_residual_compressed`` : int
             Size of the zlib-compressed residual in bytes.
         ``total_bytes`` : int
-            Total size of *binary_data* in bytes.
+            Total compressed size in bytes.
         ``original_bytes`` : int
             Uncompressed size of the original tile in bytes (float32).
         ``compression_ratio`` : float
@@ -783,7 +845,7 @@ def compression_info(
 
     See Also
     --------
-    compress : Produces the byte array consumed by this function.
+    compress : Produces the tuple consumed by this function.
 
     Examples
     --------
@@ -796,13 +858,12 @@ def compression_info(
     >>> info["compression_ratio"] > 1.0
     True
     """
-    buf = bytes(binary_data)
-    n, _q_lo, _q_hi, _sigma_floor = struct.unpack(_HEADER_FMT, buf[:_HEADER_BYTES])
+    compressed_bytes, n, q_scale, low = compressed_data
 
     low_m = n // downsample_factor
     bytes_low = low_m * low_m * 4  # float32
-    bytes_residual = len(buf) - _HEADER_BYTES - bytes_low
-    total_bytes = len(buf)
+    bytes_residual = len(compressed_bytes)
+    total_bytes = bytes_residual + bytes_low
 
     orig_n = original_n if original_n is not None else n
     original_bytes = orig_n * orig_n * 4
@@ -811,8 +872,8 @@ def compression_info(
     return {
         "n": int(n),
         "downsample_factor": downsample_factor,
+        "q_scale": float(q_scale),
         "low_grid": f"{low_m}x{low_m}",
-        "bytes_header": _HEADER_BYTES,
         "bytes_low_layer": bytes_low,
         "bytes_residual_compressed": bytes_residual,
         "total_bytes": total_bytes,
