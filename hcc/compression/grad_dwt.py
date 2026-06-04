@@ -548,6 +548,8 @@ def compress(
     >>> isinstance(enc, tuple) and len(enc) == 3
     True
     """
+    import pywt as _pywt
+
     if quantize_bits not in (8, 16):
         raise ValueError("quantize_bits must be 8 or 16")
 
@@ -568,34 +570,56 @@ def compress(
     coeffs_arr, _ = dwt_forward(tile_2d, wavelet, levels)
     slices = _coeff_slices((n, n), wavelet, levels)
 
-    # ── LL subband: store losslessly as float32 ───────────────────────
-    # slices[0] is the (row_slice, col_slice) of the LL approximation in
-    # the top-left corner of coeffs_arr.  It is tiny: (n/2^levels)².
-    ll_values = coeffs_arr[slices[0]].copy()   # shape (n_ll, n_ll), float32
-
-    # ── Detail subbands: uniform quantisation ─────────────────────────
-    # Zero out the LL region so q_scale is calibrated on detail energy.
-    detail_arr = coeffs_arr.copy()
-    detail_arr[slices[0]] = 0.0
-
-    max_level_int = (2 ** (quantize_bits - 1)) - 1   # 127 or 32 767
-    max_abs = float(np.max(np.abs(detail_arr)))
-    if max_abs == 0.0:
-        max_abs = 1.0
-    q_scale = float(np.float32(max_abs / max_level_int))
-
-    detail_q = np.round(detail_arr / q_scale).astype(
-        np.int8 if quantize_bits == 8 else np.int16
+    # Decompose the flat coefficient array back into the pywt subband list
+    # so we can normalise each subband independently.
+    coeffs_list = _pywt.array_to_coeffs(
+        coeffs_arr.astype(np.float64), slices, output_format="wavedec2"
     )
-    # The LL region is already 0 in detail_q.
+    # coeffs_list[0]   = LL approximation  (shape n_ll × n_ll)
+    # coeffs_list[i>0] = (cH, cV, cD) tuple at decomposition level i
 
-    # ── Pack: header(8 B) + LL float32 + zlib(detail_q) ──────────────
-    ll_bytes = ll_values.ravel().tobytes()                        # float32 raw
-    detail_compressed = zlib.compress(detail_q.tobytes(), level=zlib_level)
-    header = struct.pack("<II", n, ll_values.size)                # n, ll_numel
-    compressed_bytes = header + ll_bytes + detail_compressed
+    # ── LL: stored losslessly as float32 ─────────────────────────────
+    ll_values = np.asarray(coeffs_list[0], dtype=np.float32)  # (n_ll, n_ll)
 
-    return compressed_bytes, n, q_scale
+    # ── Detail subbands: per-subband normalisation ────────────────────
+    # Each subband is independently scaled to fill ±max_int.  This mirrors
+    # JPEG 2000's approach and prevents fine-scale subbands (small values)
+    # from being rounded to zero because of a q_scale dominated by
+    # coarse-scale subbands (large values).
+    max_int = (2 ** (quantize_bits - 1)) - 1   # 127 or 32 767
+    subband_scales: list[np.float32] = []
+    norm_list: list = [np.zeros_like(ll_values, dtype=np.float64)]  # LL → 0
+
+    for detail_tuple in coeffs_list[1:]:        # (cH, cV, cD) per level
+        norm_details = []
+        for subband in detail_tuple:
+            scale = float(np.max(np.abs(subband)))
+            if scale == 0.0:
+                scale = 1.0
+            subband_scales.append(np.float32(scale))
+            norm_details.append(subband * (max_int / scale))
+        norm_list.append(tuple(norm_details))
+
+    # Re-pack normalised subbands into a single flat array, then quantise
+    norm_flat, _ = _pywt.coeffs_to_array(norm_list)
+    norm_flat = np.asarray(norm_flat, dtype=np.float32)
+    dtype_q = np.int8 if quantize_bits == 8 else np.int16
+    detail_q = np.round(np.clip(norm_flat, -max_int, max_int)).astype(dtype_q)
+    # LL region in detail_q is 0 (norm_list[0] is all zeros)
+
+    # ── Binary format ─────────────────────────────────────────────────
+    # header (12 B) : uint32 n, uint32 ll_numel, uint32 n_subbands
+    # ll_float32    : ll_numel × 4 B  (lossless)
+    # scales_float32: n_subbands × 4 B  (one per detail subband)
+    # payload       : zlib(detail_q)
+    ll_bytes     = ll_values.ravel().tobytes()
+    scales_bytes = np.array(subband_scales, dtype=np.float32).tobytes()
+    payload      = zlib.compress(detail_q.tobytes(), level=zlib_level)
+    header       = struct.pack("<III", n, ll_values.size, len(subband_scales))
+    compressed_bytes = header + ll_bytes + scales_bytes + payload
+
+    # q_scale = 1.0 sentinel; all per-subband scales are embedded in the bytes
+    return compressed_bytes, n, 1.0
 
 
 def decompress(
@@ -643,31 +667,57 @@ def decompress(
     >>> rec.shape == chunk.shape
     True
     """
-    compressed_bytes, n, q_scale = compressed_data
+    import pywt as _pywt
+
+    compressed_bytes, n, _ = compressed_data   # q_scale ignored (embedded)
 
     # ── Unpack header ─────────────────────────────────────────────────
-    _HEADER = struct.calcsize("<II")
-    n_stored, ll_numel = struct.unpack("<II", compressed_bytes[:_HEADER])
+    _HDR = struct.calcsize("<III")
+    n_stored, ll_numel, n_subbands = struct.unpack("<III", compressed_bytes[:_HDR])
 
     # ── Read LL float32 (lossless) ────────────────────────────────────
-    ll_byte_end = _HEADER + ll_numel * 4
+    ll_end = _HDR + ll_numel * 4
     ll_values = np.frombuffer(
-        compressed_bytes[_HEADER:ll_byte_end], dtype=np.float32
+        compressed_bytes[_HDR:ll_end], dtype=np.float32
     ).copy()
     ll_side = int(round(ll_numel ** 0.5))
 
-    # ── Decompress detail coefficients ────────────────────────────────
-    dtype = np.int8 if quantize_bits == 8 else np.int16
+    # ── Read per-subband scales ────────────────────────────────────────
+    scales_end = ll_end + n_subbands * 4
+    subband_scales = np.frombuffer(
+        compressed_bytes[ll_end:scales_end], dtype=np.float32
+    ).copy()
+
+    # ── Decompress quantised detail coefficients ──────────────────────
+    dtype_q = np.int8 if quantize_bits == 8 else np.int16
     detail_q = np.frombuffer(
-        zlib.decompress(compressed_bytes[ll_byte_end:]), dtype=dtype
+        zlib.decompress(compressed_bytes[scales_end:]), dtype=dtype_q
     ).reshape(n, n)
 
-    # ── Reconstruct full coefficient array ────────────────────────────
+    # ── Denormalise per subband and restore LL ────────────────────────
     slices = _coeff_slices((n, n), wavelet, levels)
-    coeffs_arr = detail_q.astype(np.float32) * float(q_scale)
-    coeffs_arr[slices[0]] = ll_values.reshape(ll_side, ll_side)   # restore LL
+    max_int = (2 ** (quantize_bits - 1)) - 1
 
-    tile_2d = dwt_inverse(coeffs_arr, slices, wavelet, levels)
+    # Split the quantised flat array back into subband list
+    norm_list = _pywt.array_to_coeffs(
+        detail_q.astype(np.float64), slices, output_format="wavedec2"
+    )
+    # norm_list[0] is the LL region (all 0s); replace with stored float32 LL
+    restored_list: list = [ll_values.reshape(ll_side, ll_side).astype(np.float64)]
+
+    scale_idx = 0
+    for detail_tuple in norm_list[1:]:          # (cH, cV, cD) per level
+        denorm = []
+        for subband_norm in detail_tuple:
+            scale = float(subband_scales[scale_idx])
+            denorm.append(subband_norm * (scale / max_int))
+            scale_idx += 1
+        restored_list.append(tuple(denorm))
+
+    # Inverse DWT directly from the subband list (skip the array round-trip)
+    tile_2d = _pywt.waverec2(
+        restored_list, wavelet=wavelet, mode="periodization"
+    ).astype(np.float32)
     return flatten_tile(tile_2d)
 
 
@@ -721,7 +771,7 @@ def lookup_preset(
     >>> sorted(p.keys())
     ['clip_percentile', 'levels', 'quantize_bits', 'wavelet', 'zlib_level']
     >>> p["wavelet"]
-    'db4'
+    'bior4.4'
     """
     table = _CODEC_PRESETS if codec else _PRESETS
     if name not in table:
@@ -789,25 +839,27 @@ def compression_info(
     >>> info["compression_ratio"] > 1.0
     True
     """
-    compressed_bytes, n, q_scale = compressed_data
+    compressed_bytes, n, _ = compressed_data
 
-    _HEADER = struct.calcsize("<II")
-    _, ll_numel = struct.unpack("<II", compressed_bytes[:_HEADER])
-    ll_bytes_size = _HEADER + ll_numel * 4
-    detail_compressed_size = len(compressed_bytes) - ll_bytes_size
+    _HDR = struct.calcsize("<III")
+    _, ll_numel, n_subbands = struct.unpack("<III", compressed_bytes[:_HDR])
+
+    ll_end    = _HDR + ll_numel * 4
+    scales_end = ll_end + n_subbands * 4
+    detail_compressed_size = len(compressed_bytes) - scales_end
 
     bytes_per_coeff = 1 if quantize_bits == 8 else 2
-    detail_raw_size = (n * n - ll_numel) * bytes_per_coeff
-    original_bytes = n * n * 4  # float32
-    total_bytes = len(compressed_bytes)
+    detail_raw_size  = (n * n - ll_numel) * bytes_per_coeff
+    original_bytes   = n * n * 4          # float32
+    total_bytes      = len(compressed_bytes)
 
     ratio = original_bytes / total_bytes if total_bytes > 0 else float("inf")
 
     return {
         "n": int(n),
-        "q_scale": float(q_scale),
         "ll_numel": int(ll_numel),
-        "bytes_ll_lossless": int(ll_bytes_size),
+        "n_subbands": int(n_subbands),
+        "bytes_header_ll_scales": int(scales_end),
         "bytes_detail_raw": int(detail_raw_size),
         "bytes_detail_compressed": int(detail_compressed_size),
         "total_bytes": int(total_bytes),
