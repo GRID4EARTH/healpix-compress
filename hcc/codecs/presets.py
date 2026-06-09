@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from zarr.abc.codec import Codec
+
+
+def preset(codec: str, name: str) -> list[Codec]:
+    """lookup codec presets and generate a codec pipeline
+
+    Parameters
+    ----------
+    codec : str
+        The name of the codec as declared by its `name` class attribute.
+    name : str
+        The name of the preset.
+
+    Returns
+    -------
+    codecs : list of codec
+        The codec pipeline as a list of codecs.
+
+    See Also
+    --------
+    :doc:`codecs`
+        The codec documentation
+    """
+
+    match codec:
+        case "hcc-grad-dct":
+            from hcc.codecs.grad_dct import lookup_presets
+
+            return lookup_presets(name)
+        case _:
+            raise ValueError(f"unknown codec: {codec}")
