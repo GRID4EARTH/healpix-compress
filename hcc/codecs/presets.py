@@ -29,8 +29,8 @@ def preset(codec: str, name: str) -> list[Codec]:
 
     match codec:
         case "hcc-grad-dct":
-            from hcc.codecs.grad_dct import lookup_presets
+            from hcc.codecs.grad_dct import lookup_preset
 
-            return lookup_presets(name)
+            return lookup_preset(name)
         case _:
             raise ValueError(f"unknown codec: {codec}")

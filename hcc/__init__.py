@@ -1,7 +1,7 @@
 from importlib.metadata import version
 
 import hcc.codecs  # noqa: F401
-from hcc.presets import preset
+from hcc.codecs.presets import preset
 
 try:
     __version__ = version("hcc")
