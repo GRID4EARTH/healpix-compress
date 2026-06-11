@@ -15,11 +15,23 @@ def dev_version(most_recent_release):
     return str(v.__replace__(release=next_version, dev=0))
 
 
+def tagged_date(tag_reference):
+    tag = tag_reference.tag
+    if tag is None:
+        return tag_reference.commit.authored_date
+
+    return tag.tagged_date
+
+
+def extract_version(tag):
+    return str(tag).lstrip("v")
+
+
 def main():
     root = pathlib.Path.cwd()
     repo = git.Repo(root)
 
-    tags = list(repo.tags)
+    tags = [extract_version(tag) for tag in sorted(repo.tags, key=tagged_date)]
     fallback_version = "0.0.0"
     most_recent_release = last(tags) if tags else fallback_version
     version = dev_version(most_recent_release)
