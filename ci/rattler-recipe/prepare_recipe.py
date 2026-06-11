@@ -24,7 +24,7 @@ def tagged_date(tag_reference):
 
 
 def extract_version(tag):
-    return str(tag)
+    return str(tag).lstrip("v")
 
 
 def main():
