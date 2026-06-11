@@ -127,7 +127,8 @@ def test_lookup_preset(name):
     from hcc.compression.grad_dct import lookup_preset as lookup_raw_preset
 
     presets = lookup_raw_preset(name)
-    codec = grad_dct.lookup_preset(name)
+    codec_pipeline = grad_dct.lookup_preset(name)
+    codec = codec_pipeline[0]
 
     assert isinstance(codec, HccDecomposeCodec)
     assert codec.factor == presets["downsample_factor"]
