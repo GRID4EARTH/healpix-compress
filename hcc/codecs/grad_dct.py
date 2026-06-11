@@ -122,7 +122,7 @@ class HccGradDctCodec(ArrayArrayCodec):
         return encoded_data
 
 
-def lookup_preset(name: str) -> HccDecomposeCodec:
+def lookup_preset(name: str) -> list[HccDecomposeCodec]:
     from zarr.codecs import BytesCodec, GzipCodec
 
     from hcc.codecs.decompose import HccDecomposeCodec
@@ -132,14 +132,16 @@ def lookup_preset(name: str) -> HccDecomposeCodec:
     factor = presets.pop("downsample_factor")
     level = presets.pop("zlib_level")
 
-    return HccDecomposeCodec(
-        factor=factor,
-        codecs={
-            "downsampled": [BytesCodec(), GzipCodec(level=level)],
-            "residuals": [
-                HccGradDctCodec(**presets),
-                BytesCodec(),
-                GzipCodec(level=level),
-            ],
-        },
-    )
+    return [
+        HccDecomposeCodec(
+            factor=factor,
+            codecs={
+                "downsampled": [BytesCodec(), GzipCodec(level=level)],
+                "residuals": [
+                    HccGradDctCodec(**presets),
+                    BytesCodec(),
+                    GzipCodec(level=level),
+                ],
+            },
+        )
+    ]
