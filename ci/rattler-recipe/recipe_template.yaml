@@ -33,6 +33,7 @@ tests:
         - pytest
         - pytest-asyncio
         - hypothesis
+        - imagecodecs
 
 about:
   summary: Zarr codec for compressing chunks of healpix data

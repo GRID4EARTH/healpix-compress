@@ -89,3 +89,4 @@ Zarr serializer
    :toctree: generated/
 
    HccSentinel2Codec
+   lookup_preset

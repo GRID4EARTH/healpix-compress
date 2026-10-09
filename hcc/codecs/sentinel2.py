@@ -155,3 +155,29 @@ class HccSentinel2Codec(ArrayBytesCodec):
             effort=self.effort,
         )
         return chunk_spec.prototype.buffer.from_bytes(stream)
+
+
+def lookup_preset(name: str) -> list[HccSentinel2Codec]:
+    """Build the codec pipeline of a named preset.
+
+    Parameters
+    ----------
+    name : {'lossless'}
+        The preset: ``'lossless'`` is the Sentinel-2 product chain with the
+        L1C/L2A metadata defaults (:math:`Q = 10000`, :math:`O = -1000`).
+
+    Returns
+    -------
+    list of HccSentinel2Codec
+        The codec pipeline, to pass as ``serializer`` or ``codecs``.
+
+    Examples
+    --------
+    >>> lookup_preset("lossless")
+    [HccSentinel2Codec(quantification_value=10000.0, add_offset=-1000.0, effort=7)]
+    """
+    match name:
+        case "lossless":
+            return [HccSentinel2Codec()]
+        case _:
+            raise ValueError(f"unknown preset for {HccSentinel2Codec.name}: {name!r}")

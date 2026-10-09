@@ -9,6 +9,7 @@ from hcc.codecs import presets
     (
         ("hcc-grad-dct", "low"),
         ("hcc-grad-dct", "high"),
+        ("hcc-sentinel2", "lossless"),
     ),
 )
 def test_preset(codec, preset) -> None:
