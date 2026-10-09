@@ -139,7 +139,14 @@ class HccDecomposeCodec(ArrayBytesCodec):
 
     def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
         subarray_dtype = Float32(endianness="little")
-        config = ArrayConfigWithScalars(order="C", write_empty_chunks=False)
+        # derive the sub-array config from the array's own, so that fields zarr
+        # adds to ArrayConfig over time (read_missing_chunks, the sharding
+        # coalescing limits, ...) are carried over instead of enumerated here
+        config = replace(
+            ArrayConfigWithScalars(**asdict(array_spec.config)),
+            order="C",
+            write_empty_chunks=False,
+        )
 
         subarray_spec = ArraySpec(
             shape=array_spec.shape,
