@@ -13,6 +13,30 @@ The codec has two parameters:
 - `delta`: how many refinement levels to average over. The averages will then have a refinement level of `original_level - delta`.
 - `top_k`: how many parameters to keep. This is equivalent to a low-pass filter. The details depend on the actual compression algorithm.
 
+## Sentinel-2 chain: digital numbers and lossless JPEG XL
+
+The `hcc-sentinel2` serializer stores a chunk of reflectances the way a Sentinel-2 product stores a band: the cells are rounded to 16-bit digital numbers, `DN = round(Q * reflectance - O)` with `DN = 0` for no-data, de-interleaved into a square raster and compressed with lossless JPEG XL. Decoding restores the quantised reflectances exactly, `(DN + O) / Q`; the rounding to the DN lattice is the only error. Chunks must be one-dimensional with a power-of-four size (one nested parent cell).
+
+It needs the optional dependency `imagecodecs` (`pip install healpix-compress[jpegxl]`).
+
+```python
+import zarr
+import hcc
+
+z = root.create_array(
+    "reflectance",
+    data=data,
+    fill_value=float("nan"),
+    chunks=(4**10,),
+    serializer=hcc.codecs.sentinel2.HccSentinel2Codec(
+        quantification_value=10000.0, add_offset=-1000.0
+    ),
+    filters=None,
+    compressors=None,
+    dimension_names=["cells"],
+)
+```
+
 ## Usage of the zarr codec
 
 ### Direct use with `zarr-python`
