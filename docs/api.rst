@@ -90,3 +90,34 @@ Zarr serializer
 
    HccSentinel2Codec
    lookup_preset
+
+API Reference — sentinel2_pyramid
+=================================
+
+.. currentmodule:: hcc.compression.sentinel2_pyramid
+
+.. automodule:: hcc.compression.sentinel2_pyramid
+   :no-members:
+   :no-undoc-members:
+
+A lossless parent level on the digital-number lattice and the children
+predicted from it, with a quantised detail whose step follows the chunk.
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   encode
+   decode
+   stream_info
+
+Zarr serializer
+---------------
+
+.. currentmodule:: hcc.codecs.sentinel2_pyramid
+
+.. autosummary::
+   :toctree: generated/
+
+   HccSentinel2PyramidCodec
+   lookup_preset

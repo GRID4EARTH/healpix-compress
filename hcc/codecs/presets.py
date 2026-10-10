@@ -36,5 +36,9 @@ def preset(codec: str, name: str) -> list[Codec]:
             from hcc.codecs.sentinel2 import lookup_preset
 
             return lookup_preset(name)
+        case "hcc-sentinel2-pyramid":
+            from hcc.codecs.sentinel2_pyramid import lookup_preset
+
+            return lookup_preset(name)
         case _:
             raise ValueError(f"unknown codec: {codec}")

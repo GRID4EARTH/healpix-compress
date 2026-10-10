@@ -173,6 +173,8 @@ def main(argv=None) -> int:
                     help="step laws: fixed, sqrt = s*(g/p50)^0.5 capped 4, linear = s*(g/p50) capped 4, "
                          "strong = s*(g/p25) capped 8")
     ap.add_argument("--targets", type=float, nargs="+", default=[1.3, 1.5, 1.75])
+    ap.add_argument("--pyramid", type=float, nargs="*", default=[],
+                    help="also run the hcc-sentinel2-pyramid codec at these relative steps")
     args = ap.parse_args(argv)
 
     import zarr
@@ -273,11 +275,30 @@ def main(argv=None) -> int:
                 summary[f"{pname} {law} x{target}"] = v
                 print(f"  {pname:<12} {law:<7} x{target}: {v['all']:5.1f} / {v['flat']:5.1f} / {v['edge']:5.1f}   (s0 {v['s0']:.0f})")
 
+    codec_rows = []
+    if args.pyramid:
+        from hcc.compression import sentinel2_pyramid
+
+        print("\nhcc-sentinel2-pyramid codec (the real codestream)")
+        print("relative_step  step(DN)  bits/cell  x UTM(JP2)  UTM RMS (DN)  floor (DN)  RMS / floor")
+        for rel in args.pyramid:
+            stream = sentinel2_pyramid.encode(cells, relative_step=rel, quantification_value=q, add_offset=o)
+            recon = sentinel2_pyramid.decode(stream, quantification_value=q, add_offset=o, dtype="float64")
+            bits = 8 * len(stream) / n
+            d = (read_back(expand_tile(recon)) - y_ref) * q
+            rms = float(np.sqrt(np.mean(d[good] ** 2)))
+            step = sentinel2_pyramid.stream_info(stream)["step"]
+            codec_rows.append(dict(relative_step=rel, step_dn=step, bits_per_cell=bits,
+                                   ratio_utm_jpeg2000=bits * CELLS_PER_PIXEL / utm_bpp, utm_rms_dn=rms,
+                                   floor_dn=floors["all"], rms_over_floor=rms / floors["all"]))
+            print(f"  {rel:11.2f}  {step:8.1f}  {bits:9.3f}  {codec_rows[-1]['ratio_utm_jpeg2000']:9.3f}  "
+                  f"{rms:11.2f}  {floors['all']:10.2f}  {rms / floors['all']:10.2f}")
+
     (out_dir / "level20_tuning.json").write_text(json.dumps(dict(
         chunk=chunk_id, band=band, base_bits_per_cell=base_bits / n, utm_jpeg2000_bits_per_pixel=utm_bpp,
         transfer_floor_dn=floors, gradient_percentiles_dn=pct,
         predictors={k: {"r2": float(1 - np.var(x20 - v[0]) / var0), "coefficients": v[1]} for k, v in predictors.items()},
-        rows=rows, summary=summary), indent=1))
+        rows=rows, summary=summary, pyramid_codec=codec_rows), indent=1))
     print(f"\nwritten: {out_dir / 'level20_tuning.json'}")
     return 0
 

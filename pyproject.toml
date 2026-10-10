@@ -10,7 +10,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-# lossless JPEG XL for the Sentinel-2 chain (hcc-sentinel2)
+# lossless JPEG XL for the Sentinel-2 chain (hcc-sentinel2, hcc-sentinel2-pyramid)
 jpegxl = ["imagecodecs"]
 
 [project.entry-points."zarr.codecs"]
@@ -18,6 +18,7 @@ hcc-dct = "hcc.codecs.dct:HccDctCodec"
 hcc-grad-dct = "hcc.codecs.grad_dct:HccGradDctCodec"
 hcc-decompose = "hcc.codecs.decompose:HccDecomposeCodec"
 hcc-sentinel2 = "hcc.codecs.sentinel2:HccSentinel2Codec"
+hcc-sentinel2-pyramid = "hcc.codecs.sentinel2_pyramid:HccSentinel2PyramidCodec"
 
 [build-system]
 requires = ["setuptools>=64.0", "setuptools-scm"]

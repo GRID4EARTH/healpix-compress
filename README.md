@@ -37,6 +37,14 @@ z = root.create_array(
 )
 ```
 
+### Two-layer variant: lossless parents, quantised children
+
+`hcc-sentinel2-pyramid` keeps the parent level (the mean of each group of four children) lossless on the DN lattice, predicts the children from it with a least-squares filter over the 5 x 5 parent neighbourhood, and quantises the difference with a step proportional to that difference's standard deviation in the chunk (`relative_step`). Rough chunks get a coarse step and smooth chunks a fine one. For Sentinel-2 B04 resampled with the PSF settings of legacy-converters, `relative_step=0.36` (the `transfer-floor` preset) puts the error it adds on the native pixels at the error the transfer itself leaves there; `relative_step=0` keeps the children on the DN lattice.
+
+```python
+serializer = hcc.codecs.sentinel2_pyramid.HccSentinel2PyramidCodec(relative_step=0.36)
+```
+
 ## Usage of the zarr codec
 
 ### Direct use with `zarr-python`
