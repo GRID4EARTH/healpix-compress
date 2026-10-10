@@ -29,3 +29,6 @@ pixi.lock
 # ci
 /ci/rattler-recipe/recipe.yaml
 /target
+
+# outputs of test/eopf_s2_to_healpix.py (source cache, converted stores, sizes)
+/test/results/
