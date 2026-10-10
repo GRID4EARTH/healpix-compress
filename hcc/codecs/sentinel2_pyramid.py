@@ -33,10 +33,13 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
 
     Parameters
     ----------
-    relative_step : float, default 0.36
+    relative_step : float, default 0.57
         The detail step as a fraction of the chunk's detail standard deviation;
-        ``0`` uses ``min_step``. The default puts the added error at the
-        transfer error of the legacy-converters Sentinel-2 PSF preset.
+        ``0`` uses ``min_step``. For Sentinel-2 B04 resampled with the
+        legacy-converters PSF preset, the default gives about 1.3 times the
+        native tile under lossless JPEG 2000, for an added error of about 1.5
+        times the transfer error; ``0.36`` puts the added error at the
+        transfer error, for about 1.5 times the native size.
     min_step : float, default 1.0
         The smallest step, in digital numbers.
     predictor_size : int, default 5
@@ -63,7 +66,7 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
 
     name: ClassVar[str] = "hcc-sentinel2-pyramid"
 
-    relative_step: float = sentinel2_pyramid.TRANSFER_FLOOR_RELATIVE_STEP
+    relative_step: float = sentinel2_pyramid.DEFAULT_RELATIVE_STEP
     min_step: float = 1.0
     predictor_size: int = 5
     quantification_value: float = sentinel2.DEFAULT_QUANTIFICATION_VALUE
@@ -182,10 +185,12 @@ def lookup_preset(name: str) -> list[HccSentinel2PyramidCodec]:
 
     Parameters
     ----------
-    name : {'transfer-floor', 'lossless'}
-        ``'transfer-floor'`` adds an error close to the transfer error of the
-        legacy-converters Sentinel-2 PSF preset (``relative_step=0.36``);
-        ``'lossless'`` keeps the children on the digital-number lattice.
+    name : {'default', 'transfer-floor', 'lossless'}
+        ``'default'`` is the codec's defaults (``relative_step=0.57``, about
+        1.3 times the native size); ``'transfer-floor'`` adds an error close to
+        the transfer error of the legacy-converters Sentinel-2 PSF preset
+        (``relative_step=0.36``); ``'lossless'`` keeps the children on the
+        digital-number lattice.
 
     Returns
     -------
@@ -198,8 +203,14 @@ def lookup_preset(name: str) -> list[HccSentinel2PyramidCodec]:
     0.0
     """
     match name:
-        case "transfer-floor":
+        case "default":
             return [HccSentinel2PyramidCodec()]
+        case "transfer-floor":
+            return [
+                HccSentinel2PyramidCodec(
+                    relative_step=sentinel2_pyramid.TRANSFER_FLOOR_RELATIVE_STEP
+                )
+            ]
         case "lossless":
             return [HccSentinel2PyramidCodec(relative_step=0.0)]
         case _:

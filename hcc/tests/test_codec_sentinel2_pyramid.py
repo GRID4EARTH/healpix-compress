@@ -27,6 +27,43 @@ class TestHccSentinel2PyramidCodec:
 
         assert actual == codec
 
+    def test_default_relative_step(self):
+        actual = codec_module.HccSentinel2PyramidCodec().relative_step
+
+        assert actual == sentinel2_pyramid.DEFAULT_RELATIVE_STEP == 0.57
+
+    @pytest.mark.parametrize(
+        ["name", "expected"],
+        [
+            pytest.param("hcc-sentinel2", "hcc-sentinel2", id="lossless"),
+            pytest.param(
+                "hcc-sentinel2-pyramid", "hcc-sentinel2-pyramid", id="pyramid"
+            ),
+        ],
+    )
+    def test_write_and_reopen_by_name(self, name, expected):
+        """The serializers resolve by name alone, as zarr does when it opens a store."""
+        data = np.linspace(0.1, 0.4, 2 * 4**4, dtype="float32")
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.create_group(store, zarr_format=3)
+            g.create_array(
+                "b04",
+                data=data,
+                chunks=(4**4,),
+                fill_value=np.nan,
+                serializer={"name": name},
+                filters=None,
+                compressors=None,
+            )
+            reopened = zarr.open_group(store, mode="r")["b04"]
+            actual = reopened.metadata.to_dict()["codecs"][0]["name"]
+            values = reopened[:]
+
+        assert actual == expected
+        # a quarter of a DN for the lattice, half a step at most for the pyramid detail
+        assert np.abs(values - data).max() < 5e-3
+
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_zarr_roundtrip(self, dtype):
         rng = np.random.default_rng(0)

@@ -24,8 +24,11 @@ asks for: for Sentinel-2 B04 resampled with the PSF settings of
 legacy-converters, the error the transfer itself leaves on the native pixels
 is close to :math:`0.058 \\sigma`, and the quantisation adds about
 :math:`0.16 s` there, so :math:`r \\approx 0.36` puts the added error at the
-transfer error. ``relative_step = 0`` uses :math:`s = s_{\\min}`; with the
-default :math:`s_{\\min} = 1` the children then sit on the DN lattice, as in
+transfer error, for a size of about 1.5 times the native tile under lossless
+JPEG 2000. The default :math:`r = 0.57` aims at about 1.3 times that size,
+for an added error of about 1.5 times the transfer error.
+``relative_step = 0`` uses :math:`s = s_{\\min}`; with the default
+:math:`s_{\\min} = 1` the children then sit on the DN lattice, as in
 :mod:`hcc.compression.sentinel2`.
 
 Cells that are ``NaN`` round-trip as ``NaN``: a parent without any valid
@@ -54,6 +57,11 @@ _FLAG_MASK = 1
 #: ``relative_step`` at which the added error matches the transfer error of
 #: the legacy-converters Sentinel-2 PSF preset, measured on B04 of tile T31UDQ.
 TRANSFER_FLOOR_RELATIVE_STEP = 0.36
+
+#: Default ``relative_step``: about 1.3 times the native tile under lossless
+#: JPEG 2000 on the same measurement, for an added error of about 1.5 times
+#: the transfer error.
+DEFAULT_RELATIVE_STEP = 0.57
 
 
 def _neighbourhood(base: np.ndarray, k: int) -> np.ndarray:
@@ -112,7 +120,7 @@ def _decoded_base(base_dn: np.ndarray, q: float, o: float) -> np.ndarray:
 def encode(
     cells: npt.NDArray[np.floating],
     *,
-    relative_step: float = TRANSFER_FLOOR_RELATIVE_STEP,
+    relative_step: float = DEFAULT_RELATIVE_STEP,
     min_step: float = 1.0,
     predictor_size: int = 5,
     quantification_value: float = sentinel2.DEFAULT_QUANTIFICATION_VALUE,
@@ -125,7 +133,7 @@ def encode(
     ----------
     cells : numpy.ndarray of floating dtype
         A 1-D nested chunk of :math:`4^\\delta` cells, :math:`\\delta \\ge 1`.
-    relative_step : float, default 0.36
+    relative_step : float, default 0.57
         The detail step as a fraction of the detail's standard deviation, in
         digital numbers; ``0`` uses ``min_step``.
     min_step : float, default 1.0
@@ -175,7 +183,7 @@ def encode(
     q, o = float(quantification_value), float(add_offset)
 
     raster = expand_tile(cells)
-    side, h = raster.shape[0], raster.shape[0] // 2
+    h = raster.shape[0] // 2
     valid = np.isfinite(raster)
     vb = valid.reshape(h, 2, h, 2)
     count = vb.sum(axis=(1, 3))
@@ -221,7 +229,6 @@ def encode(
         len(detail_bytes),
         len(mask),
     )
-    assert side == 2**delta
     return header + coef_bytes + base_bytes + detail_bytes + mask
 
 
