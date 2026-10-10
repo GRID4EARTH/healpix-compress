@@ -213,6 +213,16 @@ def lossless_sizes(dn: np.ndarray, chunks: tuple[int, int]) -> dict:
 
 
 # --- the conversion ------------------------------------------------------------
+def serializer_config(cfg: dict, band_source: dict) -> dict:
+    """The serializer of the configuration, with Q and O derived from the
+    band's own ``scale_factor`` and ``add_offset`` unless given."""
+    codec = copy.deepcopy(cfg["codec"])
+    conf = codec.setdefault("configuration", {})
+    conf.setdefault("quantification_value", 1.0 / band_source["scale_factor"])
+    conf.setdefault("add_offset", band_source["add_offset"] / band_source["scale_factor"])
+    return codec
+
+
 def make_settings(cfg: dict, codecs: list[dict] | None) -> dict:
     """The legacy-converters preset of the product, restricted to the group,
     with the resampler parameters and the codecs of the configuration."""
@@ -253,21 +263,71 @@ def output_extent(spec: dict | None, chunk_level: int):
     raise ValueError(f"output_extent must be null, {{'point': [lon, lat]}} or {{'bbox': [...]}}, got {spec}")
 
 
-def convert(input_store: Path, cfg: dict, codecs: list[dict] | None, dest: Path, force: bool) -> Path:
-    from healpix_convert import create_healpix_dataset
+def convert_worker(input_store: Path, cfg: dict, codecs: list[dict] | None, dest: Path, start: int, stop: int) -> int:
+    """One batch of chunks, in its own process: the converter's chunk loop keeps
+    memory from one chunk to the next (about 25 MB per chunk), which exhausts
+    a 16 GB machine before a 10 m tile is through. Each batch rebuilds the
+    staging cache (cheap), the first one also creates the output store.
 
-    if dest.exists() and not force:
-        print(f"  {dest.name}: exists, kept (use --force to rebuild)")
-        return dest
-    if dest.exists():
-        shutil.rmtree(dest)
+    Prints ``N_CHUNKS=<n>`` for the driver and returns the number of chunks.
+    """
+    from healpix_convert import (
+        convert_group_to_healpix,
+        create_staging_cache,
+        prepare_healpix_dataset,
+    )
+    from healpix_convert.healpix_converters import init_converter
+
     settings = make_settings(cfg, codecs)
     chunk_level = settings["group_settings"][cfg["group"]]["chunk"]["healpix"]["refinement_level"]
+    group = f"/{cfg['group'].lstrip('/')}"  # the converter filters groups on DataTree paths
+    cache = create_staging_cache([str(input_store)], settings, groups=[group],
+                                 output_extent=output_extent(cfg.get("output_extent"), chunk_level))
+    if start == 0:
+        prepare_healpix_dataset(cache, settings, str(dest))
+    import zarr
+    from healpix_convert.settings.common import validate_convert_settings
+
+    converter = init_converter(Path(cfg["group"]), cache=cache, settings=validate_convert_settings(settings),
+                               output_store=zarr.open_group(str(dest), mode="a").store)
+    n_chunks = math.ceil(converter.cell_dim_size / converter.cell_dim_chunk_size)
+    print(f"N_CHUNKS={n_chunks}", flush=True)
+    indices = list(range(start, min(stop, n_chunks)))
+    if indices:
+        convert_group_to_healpix(group, cache=cache, settings=settings, output_path=str(dest), chunk_indices=indices)
+    return n_chunks
+
+
+def convert(config: Path, cfg: dict, raw: bool, dest: Path, force: bool, batch: int) -> Path:
+    """Drive the conversion batch by batch in fresh processes, resumably."""
+    import subprocess
+
+    import zarr
+
+    progress_path = dest.with_name(dest.name + ".progress.json")
+    progress = json.loads(progress_path.read_text()) if progress_path.exists() and not force else {}
+    if progress.get("complete"):
+        print(f"  {dest.name}: complete, kept (use --force to rebuild)")
+        return dest
+    if force and dest.exists():
+        shutil.rmtree(dest)
     t0 = time.perf_counter()
-    # the converter filters groups on DataTree paths, which carry a leading slash
-    create_healpix_dataset([str(input_store)], settings, str(dest), groups=[f"/{cfg['group'].lstrip('/')}"],
-                           output_extent=output_extent(cfg.get("output_extent"), chunk_level))
-    print(f"  {dest.name}: converted in {(time.perf_counter() - t0) / 60:.1f} min")
+    start = progress.get("next", 0)
+    n_chunks = progress.get("n_chunks")
+    while n_chunks is None or start < n_chunks:
+        stop = start + batch if n_chunks is None else min(start + batch, n_chunks)
+        cmd = [sys.executable, str(Path(__file__).resolve()), str(config), "--worker", dest.name,
+               str(start), str(stop)] + (["--raw"] if raw else [])
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        if out.returncode != 0:
+            print(out.stdout[-3000:], out.stderr[-3000:], sep="\n")
+            raise RuntimeError(f"conversion batch {start}-{stop} failed (exit {out.returncode})")
+        n_chunks = int(next(line for line in out.stdout.splitlines() if line.startswith("N_CHUNKS=")).split("=")[1])
+        start = min(stop, n_chunks)
+        progress.update(n_chunks=n_chunks, next=start, complete=start >= n_chunks)
+        progress_path.write_text(json.dumps(progress))
+        print(f"  {dest.name}: {start}/{n_chunks} chunks, {(time.perf_counter() - t0) / 60:.1f} min", flush=True)
+    zarr.consolidate_metadata(str(dest))
     return dest
 
 
@@ -343,6 +403,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("config", type=Path)
     ap.add_argument("--force", action="store_true", help="refetch the source and rebuild the stores")
+    ap.add_argument("--batch", type=int, default=100, help="chunks per conversion process")
+    ap.add_argument("--worker", nargs=3, metavar=("STORE", "START", "STOP"), help=argparse.SUPPRESS)
+    ap.add_argument("--raw", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     import zarr
@@ -352,6 +415,16 @@ def main(argv=None) -> int:
     out_dir = out_dir if out_dir.is_absolute() else HERE / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     group, bands = cfg["group"], list(cfg["bands"])
+
+    if args.worker:
+        store, start, stop = args.worker
+        source = json.loads((out_dir / "source.json").read_text())
+        codec = None if args.raw else serializer_config(cfg, source[bands[0]])
+        import hcc  # noqa: F401  -- registers the serializer with zarr
+
+        convert_worker(out_dir / "source_subset.zarr", cfg, None if codec is None else [codec],
+                       out_dir / store, int(start), int(stop))
+        return 0
 
     # 1. the source product, and a local subset with the bands under test
     if cfg["input"].get("path"):
@@ -376,17 +449,15 @@ def main(argv=None) -> int:
         source_path.write_text(json.dumps(source, indent=1))
 
     # 2. the serializer, with Q and O from the band's own scaling
-    codec = copy.deepcopy(cfg["codec"])
-    conf = codec.setdefault("configuration", {})
-    conf.setdefault("quantification_value", 1.0 / source[bands[0]]["scale_factor"])
-    conf.setdefault("add_offset", source[bands[0]]["add_offset"] / source[bands[0]]["scale_factor"])
-    q, o = conf["quantification_value"], conf["add_offset"]
+    codec = serializer_config(cfg, source[bands[0]])
+    q, o = codec["configuration"]["quantification_value"], codec["configuration"]["add_offset"]
     import hcc  # noqa: F401  -- registers the serializer with zarr
 
     # 3. the conversions
     print("conversion")
-    hpx = convert(subset, cfg, [codec], out_dir / "healpix_codec.zarr", args.force)
-    raw = convert(subset, cfg, None, out_dir / "healpix_raw.zarr", args.force) if cfg.get("raw_reference") else None
+    hpx = convert(args.config, cfg, False, out_dir / "healpix_codec.zarr", args.force, args.batch)
+    raw = (convert(args.config, cfg, True, out_dir / "healpix_raw.zarr", args.force, args.batch)
+           if cfg.get("raw_reference") else None)
 
     # 4. the sizes
     arrays = output_arrays(hpx)
