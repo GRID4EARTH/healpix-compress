@@ -264,10 +264,10 @@ def output_extent(spec: dict | None, chunk_level: int):
 
 
 def convert_worker(input_store: Path, cfg: dict, codecs: list[dict] | None, dest: Path, start: int, stop: int) -> int:
-    """One batch of chunks, in its own process: the converter's chunk loop keeps
-    memory from one chunk to the next (about 25 MB per chunk), which exhausts
-    a 16 GB machine before a 10 m tile is through. Each batch rebuilds the
-    staging cache (cheap), the first one also creates the output store.
+    """One batch of chunks, in its own process, so that an interrupted
+    conversion resumes from the last completed batch (a whole 10 m tile takes
+    about half an hour on a laptop CPU). Each batch rebuilds the staging cache
+    (cheap), the first one also creates the output store.
 
     Prints ``N_CHUNKS=<n>`` for the driver and returns the number of chunks.
     """
