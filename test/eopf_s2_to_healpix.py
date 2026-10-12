@@ -489,7 +489,10 @@ def main(argv=None) -> int:
             raw_cells = np.asarray(zarr.open_array(output_arrays(raw)[band], mode="r")[:], dtype="float64")
             row["healpix_raw"] = {"bytes": dir_bytes(output_arrays(raw)[band]), **band_stats(raw_cells, q, o)}
             inside = (raw_cells >= (1 + o) / q) & (raw_cells <= (65535 + o) / q) & np.isfinite(cells)
-            row["healpix_raw"]["max_abs_err_in_range"] = float(np.abs(cells - raw_cells)[inside].max()) if inside.any() else None
+            err = (cells - raw_cells)[inside]
+            row["healpix_raw"]["max_abs_err_in_range"] = float(np.abs(err).max()) if inside.any() else None
+            row["healpix_raw"]["rms_err_in_range_dn"] = float(np.sqrt(np.mean(err**2)) * q) if inside.any() else None
+            del raw_cells, err, inside
         u, h = row["utm"], row["healpix"]
         key = f"{codec['name']}_bytes"
         partial = cfg.get("output_extent") is not None
@@ -533,14 +536,36 @@ def main(argv=None) -> int:
             r = row["healpix_raw"]
             print(f"  PSF output (no codec): min {r['min']:.4f}, max {r['max']:.4f}, <0 {r['pct_below_0']:.3f}%, "
                   f">1 {r['pct_above_1']:.3f}%; the serializer clips {r['n_clipped_low']} low / {r['n_clipped_high']} "
-                  f"high and errs by at most {r['max_abs_err_in_range']:.2e} in range")
+                  f"high and errs by at most {r['max_abs_err_in_range']:.2e} in range "
+                  f"({r['rms_err_in_range_dn']:.2f} DN RMS per cell)")
         else:
             print(f"  decoded output: min {h['min']:.4f}, max {h['max']:.4f}, <0 {h['pct_below_0']:.3f}%, "
                   f">1 {h['pct_above_1']:.3f}% (set raw_reference to score the PSF before clipping)")
         for k, v in row["ratios"].items():
             print(f"  {k:<44} {v}")
     print(f"\nwritten: {out_dir / 'sizes.json'}")
+
+    if cfg["output"].get("s3"):
+        upload(out_dir, cfg["output"]["s3"], cfg["output"].get("storage_options", {}))
     return 0
+
+
+def upload(out_dir: Path, dest: str, storage_options: dict) -> None:
+    """Copy the results (not the cached source subset) to an object store."""
+    import fsspec
+
+    fs, root = fsspec.core.url_to_fs(dest.rstrip("/"), **storage_options)
+    for path in sorted(out_dir.iterdir()):
+        if path.name == "source_subset.zarr":
+            continue
+        target = f"{root}/{path.name}"
+        # file by file: fs.put(dir, target, recursive=True) nests the directory
+        # inside target when target already exists (e.g. after an earlier upload)
+        files = [f for f in path.rglob("*") if f.is_file()] if path.is_dir() else [path]
+        for f in files:
+            fs.put_file(str(f), target if f == path else f"{target}/{f.relative_to(path).as_posix()}")
+        print(f"  uploaded {path.name}", flush=True)
+    print(f"results in {dest}", flush=True)
 
 
 if __name__ == "__main__":
