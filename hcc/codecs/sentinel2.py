@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
@@ -28,11 +29,13 @@ if TYPE_CHECKING:
 class HccSentinel2Codec(ArrayBytesCodec):
     """Zarr ArrayBytesCodec: Sentinel-2 digital numbers plus lossless JPEG XL.
 
-    Each chunk must be a 1-D nested chunk of :math:`4^\\delta` floating-point
-    reflectances. It is stored as the lossless JPEG XL codestream of the
+    Each chunk must hold nested chunks of :math:`4^\\delta` floating-point
+    reflectances along its last axis; leading axes (time, band, ...) are free.
+    Each row is stored as the lossless JPEG XL codestream of the
     :math:`2^\\delta \\times 2^\\delta` raster of its digital numbers, so the
     only error is the rounding to the DN lattice; ``NaN`` cells round-trip
-    through the no-data number ``0``.
+    through the no-data number ``0``. A 1-D chunk is its single codestream;
+    see :func:`hcc.compression.sentinel2.encode_rows` for the others.
 
     Parameters
     ----------
@@ -117,7 +120,8 @@ class HccSentinel2Codec(ArrayBytesCodec):
         dtype : ZDType
             Array dtype; must be a floating dtype.
         chunk_grid : ChunkGrid
-            Chunk grid; chunks must be 1-D with a power-of-four size.
+            Chunk grid; the last axis of the chunks must have a power-of-four
+            size.
         """
         native = dtype.to_native_dtype()
         if not np.issubdtype(native, np.floating):
@@ -126,7 +130,7 @@ class HccSentinel2Codec(ArrayBytesCodec):
             )
         chunk_shape = getattr(chunk_grid, "chunk_shape", None)
         if chunk_shape is not None:
-            sentinel2.check_chunk_shape(tuple(chunk_shape))
+            sentinel2.check_rows_shape(tuple(chunk_shape))
 
     def compute_encoded_size(
         self, input_byte_length: int, chunk_spec: ArraySpec
@@ -141,11 +145,15 @@ class HccSentinel2Codec(ArrayBytesCodec):
         # in a worker thread, like zarr's own compressors: the event loop stays free
         # and chunks written or read concurrently are coded in parallel
         cells = await asyncio.to_thread(
-            sentinel2.decode,
+            sentinel2.decode_rows,
             chunk_data.to_bytes(),
-            quantification_value=self.quantification_value,
-            add_offset=self.add_offset,
-            dtype=chunk_spec.dtype.to_native_dtype(),
+            tuple(chunk_spec.shape),
+            partial(
+                sentinel2.decode,
+                quantification_value=self.quantification_value,
+                add_offset=self.add_offset,
+                dtype=chunk_spec.dtype.to_native_dtype(),
+            ),
         )
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(cells)
 
@@ -153,11 +161,14 @@ class HccSentinel2Codec(ArrayBytesCodec):
         self, chunk_array: NDBuffer, chunk_spec: ArraySpec
     ) -> Buffer | None:
         stream = await asyncio.to_thread(
-            sentinel2.encode,
+            sentinel2.encode_rows,
             chunk_array.as_numpy_array(),
-            quantification_value=self.quantification_value,
-            add_offset=self.add_offset,
-            effort=self.effort,
+            partial(
+                sentinel2.encode,
+                quantification_value=self.quantification_value,
+                add_offset=self.add_offset,
+                effort=self.effort,
+            ),
         )
         return chunk_spec.prototype.buffer.from_bytes(stream)
 

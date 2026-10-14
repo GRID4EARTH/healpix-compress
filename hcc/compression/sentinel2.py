@@ -26,6 +26,7 @@ step :math:`1 / Q`, a uniform error of RMS :math:`1 / (Q \\sqrt{12})`.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -85,6 +86,102 @@ def check_chunk_shape(shape: tuple[int, ...]) -> int:
             f"the chunk size must be a power of four (one nested parent cell), got {size}"
         )
     return delta
+
+
+def check_rows_shape(shape: tuple[int, ...]) -> int:
+    """Check that a chunk is a stack of nested parent cells along its last axis.
+
+    The leading axes (time, band, ...) are free; the last one must hold the
+    :math:`4^\\delta` cells of one nested parent cell.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Chunk shape, ``(*lead, 4**delta)``.
+
+    Returns
+    -------
+    int
+        :math:`\\delta`, such that each row holds :math:`4^\\delta` cells.
+
+    Examples
+    --------
+    >>> check_rows_shape((1, 3, 4**8))
+    8
+    """
+    if len(shape) == 0:
+        raise ValueError("expected a chunk with at least one axis, got a scalar chunk")
+    return check_chunk_shape((shape[-1],))
+
+
+def encode_rows(
+    cells: npt.NDArray[np.floating], encode_row: Callable[[np.ndarray], bytes]
+) -> bytes:
+    """Encode a chunk row by row along its last axis.
+
+    A 1-D chunk is the codestream of its single row, unchanged. A chunk with
+    leading axes is the little-endian ``uint64`` byte length of each row's
+    codestream, rows in C order, followed by the codestreams.
+
+    Parameters
+    ----------
+    cells : numpy.ndarray
+        Chunk of shape ``(*lead, 4**delta)``.
+    encode_row : callable
+        Encodes one 1-D row of ``4**delta`` cells.
+
+    Returns
+    -------
+    bytes
+
+    See Also
+    --------
+    decode_rows : The inverse operation.
+    """
+    cells = np.asarray(cells)
+    if cells.ndim == 1:
+        return encode_row(cells)
+    streams = [encode_row(row) for row in cells.reshape(-1, cells.shape[-1])]
+    lengths = np.array([len(s) for s in streams], dtype="<u8")
+    return lengths.tobytes() + b"".join(streams)
+
+
+def decode_rows(
+    data: bytes,
+    shape: tuple[int, ...],
+    decode_row: Callable[[bytes], np.ndarray],
+) -> np.ndarray:
+    """Decode a chunk written by :func:`encode_rows`.
+
+    Parameters
+    ----------
+    data : bytes
+        The encoded chunk.
+    shape : tuple of int
+        Chunk shape, ``(*lead, 4**delta)``.
+    decode_row : callable
+        Decodes one row's codestream to a 1-D array.
+
+    Returns
+    -------
+    numpy.ndarray
+        The chunk, of shape *shape*.
+    """
+    if len(shape) == 1:
+        return decode_row(data)
+    n_rows = math.prod(shape[:-1])
+    header = 8 * n_rows
+    if len(data) < header:
+        raise ValueError(f"truncated chunk: {len(data)} bytes for {n_rows} rows")
+    lengths = np.frombuffer(data[:header], dtype="<u8").astype(np.int64)
+    if header + int(lengths.sum()) != len(data):
+        raise ValueError(
+            f"corrupt chunk: {int(lengths.sum())} bytes of rows after a {header}-byte "
+            f"header, got {len(data)} bytes"
+        )
+    ends = header + np.cumsum(lengths)
+    rows = [decode_row(data[end - size : end]) for end, size in zip(ends, lengths)]
+    return np.stack(rows).reshape(shape)
 
 
 def quantize(

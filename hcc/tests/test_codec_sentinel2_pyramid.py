@@ -100,10 +100,65 @@ class TestHccSentinel2PyramidCodec:
         assert actual.dtype == data.dtype
         assert_equal(actual, expected)
 
+    def test_zarr_roundtrip_leading_axes(self):
+        rng = np.random.default_rng(0)
+        data = (0.2 + 0.05 * rng.standard_normal((2, 3, 4**4))).astype("float32")
+        data[0, 1, 7] = np.nan
+        codec = codec_module.HccSentinel2PyramidCodec(relative_step=0.5, effort=1)
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                data=data,
+                chunks=(1, 3, 4**4),
+                fill_value=np.nan,
+                serializer=codec,
+                filters=None,
+                compressors=None,
+            )
+
+            actual = z[:]
+
+        expected = np.stack(
+            [
+                sentinel2_pyramid.decode(
+                    sentinel2_pyramid.encode(row, relative_step=0.5, effort=1)
+                )
+                for row in data.reshape(-1, 4**4)
+            ]
+        ).reshape(data.shape)
+        assert_equal(actual, expected)
+
+    def test_one_dimensional_chunk_bytes_unchanged(self):
+        """1-D chunks keep the single-codestream format of existing stores."""
+        data = np.linspace(0.1, 0.4, 4**4, dtype="float32")
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            g.create_array(
+                "z",
+                data=data,
+                chunks=(4**4,),
+                serializer=codec_module.HccSentinel2PyramidCodec(effort=1),
+                filters=None,
+                compressors=None,
+            )
+            actual = bytes(store._store_dict["z/c/0"].to_bytes())
+
+        assert actual == sentinel2_pyramid.encode(data, effort=1)
+
     @pytest.mark.parametrize(
         ["dtype", "chunks", "expectation"],
         [
             pytest.param("float32", (16,), nullcontext(), id="valid"),
+            pytest.param("float32", (2, 16), nullcontext(), id="leading-axis"),
+            pytest.param(
+                "float32",
+                (2, 1),
+                pytest.raises(ValueError),
+                id="leading-axis-single-cell-rows",
+            ),
             pytest.param(
                 "uint16", (16,), pytest.raises(ValueError), id="integer-dtype"
             ),
@@ -123,7 +178,7 @@ class TestHccSentinel2PyramidCodec:
             g = zarr.api.synchronous.create_group(store)
             g.create_array(
                 "z",
-                shape=(32,),
+                shape=(2, 32)[2 - len(chunks) :],
                 dtype=dtype,
                 chunks=chunks,
                 serializer=codec_module.HccSentinel2PyramidCodec(),

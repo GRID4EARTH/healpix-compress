@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
@@ -29,8 +30,10 @@ if TYPE_CHECKING:
 class HccSentinel2PyramidCodec(ArrayBytesCodec):
     """Zarr ArrayBytesCodec: lossless parent level, predicted and quantised children.
 
-    Each chunk must be a 1-D nested chunk of :math:`4^\\delta` floating-point
-    reflectances, :math:`\\delta \\ge 1`.
+    Each chunk must hold nested chunks of :math:`4^\\delta` floating-point
+    reflectances, :math:`\\delta \\ge 1`, along its last axis; leading axes
+    (time, band, ...) are free and each row is coded on its own (see
+    :func:`hcc.compression.sentinel2.encode_rows`).
 
     Parameters
     ----------
@@ -132,7 +135,8 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         dtype : ZDType
             Array dtype; must be a floating dtype.
         chunk_grid : ChunkGrid
-            Chunk grid; chunks must be 1-D with a power-of-four size of at least 4.
+            Chunk grid; the last axis of the chunks must have a power-of-four
+            size of at least 4.
         """
         native = dtype.to_native_dtype()
         if not np.issubdtype(native, np.floating):
@@ -142,7 +146,7 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         chunk_shape = getattr(chunk_grid, "chunk_shape", None)
         if (
             chunk_shape is not None
-            and sentinel2.check_chunk_shape(tuple(chunk_shape)) < 1
+            and sentinel2.check_rows_shape(tuple(chunk_shape)) < 1
         ):
             raise ValueError(
                 f"{self.name} needs chunks of at least 4 cells, got {tuple(chunk_shape)}"
@@ -161,11 +165,15 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         # in a worker thread, like zarr's own compressors: the event loop stays free
         # and chunks written or read concurrently are coded in parallel
         cells = await asyncio.to_thread(
-            sentinel2_pyramid.decode,
+            sentinel2.decode_rows,
             chunk_data.to_bytes(),
-            quantification_value=self.quantification_value,
-            add_offset=self.add_offset,
-            dtype=chunk_spec.dtype.to_native_dtype(),
+            tuple(chunk_spec.shape),
+            partial(
+                sentinel2_pyramid.decode,
+                quantification_value=self.quantification_value,
+                add_offset=self.add_offset,
+                dtype=chunk_spec.dtype.to_native_dtype(),
+            ),
         )
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(cells)
 
@@ -173,14 +181,17 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         self, chunk_array: NDBuffer, chunk_spec: ArraySpec
     ) -> Buffer | None:
         stream = await asyncio.to_thread(
-            sentinel2_pyramid.encode,
+            sentinel2.encode_rows,
             chunk_array.as_numpy_array(),
-            relative_step=self.relative_step,
-            min_step=self.min_step,
-            predictor_size=self.predictor_size,
-            quantification_value=self.quantification_value,
-            add_offset=self.add_offset,
-            effort=self.effort,
+            partial(
+                sentinel2_pyramid.encode,
+                relative_step=self.relative_step,
+                min_step=self.min_step,
+                predictor_size=self.predictor_size,
+                quantification_value=self.quantification_value,
+                add_offset=self.add_offset,
+                effort=self.effort,
+            ),
         )
         return chunk_spec.prototype.buffer.from_bytes(stream)
 
