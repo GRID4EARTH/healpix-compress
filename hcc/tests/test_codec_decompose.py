@@ -134,3 +134,32 @@ async def test_codec_roundtrip_default_subcodecs(delta):
     decoded = await codec._decode_single(encoded, spec)
 
     np.testing.assert_allclose(decoded.as_numpy_array(), data)
+
+
+@pytest.mark.parametrize("factor", [1, 2, 4])
+def test_zarr_array_roundtrip(factor):
+    """The codec evolved by zarr itself, through a real array: this is where
+    `evolve_from_array_spec` runs, and it must build the sub-array config
+    from whatever fields the installed zarr's ArrayConfig has."""
+    data = np.linspace(0, 1, 4**4, dtype=np.float32)
+
+    with zarr.storage.MemoryStore() as store:
+        g = zarr.api.synchronous.create_group(store)
+        z = g.create_array(
+            "z",
+            data=data,
+            chunks=data.shape,
+            fill_value=np.nan,
+            serializer=decompose.HccDecomposeCodec(
+                factor=factor, codecs={"downsampled": None, "residuals": None}
+            ),
+            filters=None,
+            compressors=None,
+        )
+        z[:] = data
+
+        actual = z[:]
+
+    # the reconstruction adds a float32 residual back onto the upsampled
+    # prediction, which costs one ULP (float32 eps = 1.19e-7) on some cells
+    np.testing.assert_allclose(actual, data, rtol=2 * np.finfo(np.float32).eps)
