@@ -6,6 +6,7 @@ See :mod:`hcc.compression.sentinel2` for the chain itself: reflectance
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
@@ -137,7 +138,10 @@ class HccSentinel2Codec(ArrayBytesCodec):
     async def _decode_single(
         self, chunk_data: Buffer, chunk_spec: ArraySpec
     ) -> NDBuffer:
-        cells = sentinel2.decode(
+        # in a worker thread, like zarr's own compressors: the event loop stays free
+        # and chunks written or read concurrently are coded in parallel
+        cells = await asyncio.to_thread(
+            sentinel2.decode,
             chunk_data.to_bytes(),
             quantification_value=self.quantification_value,
             add_offset=self.add_offset,
@@ -148,7 +152,8 @@ class HccSentinel2Codec(ArrayBytesCodec):
     async def _encode_single(
         self, chunk_array: NDBuffer, chunk_spec: ArraySpec
     ) -> Buffer | None:
-        stream = sentinel2.encode(
+        stream = await asyncio.to_thread(
+            sentinel2.encode,
             chunk_array.as_numpy_array(),
             quantification_value=self.quantification_value,
             add_offset=self.add_offset,

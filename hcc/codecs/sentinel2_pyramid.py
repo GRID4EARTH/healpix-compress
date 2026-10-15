@@ -7,6 +7,7 @@ detail whose step follows the chunk's own detail.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
@@ -157,7 +158,10 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
     async def _decode_single(
         self, chunk_data: Buffer, chunk_spec: ArraySpec
     ) -> NDBuffer:
-        cells = sentinel2_pyramid.decode(
+        # in a worker thread, like zarr's own compressors: the event loop stays free
+        # and chunks written or read concurrently are coded in parallel
+        cells = await asyncio.to_thread(
+            sentinel2_pyramid.decode,
             chunk_data.to_bytes(),
             quantification_value=self.quantification_value,
             add_offset=self.add_offset,
@@ -168,7 +172,8 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
     async def _encode_single(
         self, chunk_array: NDBuffer, chunk_spec: ArraySpec
     ) -> Buffer | None:
-        stream = sentinel2_pyramid.encode(
+        stream = await asyncio.to_thread(
+            sentinel2_pyramid.encode,
             chunk_array.as_numpy_array(),
             relative_step=self.relative_step,
             min_step=self.min_step,
