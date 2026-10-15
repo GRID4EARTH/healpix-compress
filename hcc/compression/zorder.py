@@ -1,3 +1,4 @@
+import functools
 import math
 from typing import TypeVar
 
@@ -7,7 +8,10 @@ import numpy.typing as npt
 T = TypeVar("T", bound=np.floating)
 
 
+@functools.lru_cache(maxsize=16)
 def _decode_zorder(delta: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint64]]:
+    # cached: a chunk size has one Morton order, and it is asked for at every chunk
+    # (the arrays are returned read-only so that no caller can alter the cache)
     size = 4**delta
     x = np.zeros((size,), dtype="uint64")
     y = np.zeros((size,), dtype="uint64")
@@ -17,6 +21,8 @@ def _decode_zorder(delta: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.u
         x |= ((code >> (bit << 1)) & 1) << bit
         y |= ((code >> ((bit << 1) + 1)) & 1) << bit
 
+    x.flags.writeable = False
+    y.flags.writeable = False
     return x, y
 
 

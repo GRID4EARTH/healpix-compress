@@ -57,3 +57,67 @@ Data
    :nosignatures:
 
    QUALITY_PRESETS
+
+API Reference — sentinel2
+=========================
+
+.. currentmodule:: hcc.compression.sentinel2
+
+.. automodule:: hcc.compression.sentinel2
+   :no-members:
+   :no-undoc-members:
+
+The Sentinel-2 product chain on a nested chunk: digital numbers, Morton
+de-interleaving, lossless JPEG XL.
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   quantize
+   dequantize
+   encode
+   decode
+   check_chunk_shape
+
+Zarr serializer
+---------------
+
+.. currentmodule:: hcc.codecs.sentinel2
+
+.. autosummary::
+   :toctree: generated/
+
+   HccSentinel2Codec
+   lookup_preset
+
+API Reference — sentinel2_pyramid
+=================================
+
+.. currentmodule:: hcc.compression.sentinel2_pyramid
+
+.. automodule:: hcc.compression.sentinel2_pyramid
+   :no-members:
+   :no-undoc-members:
+
+A lossless parent level on the digital-number lattice and the children
+predicted from it, with a quantised detail whose step follows the chunk.
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   encode
+   decode
+   stream_info
+
+Zarr serializer
+---------------
+
+.. currentmodule:: hcc.codecs.sentinel2_pyramid
+
+.. autosummary::
+   :toctree: generated/
+
+   HccSentinel2PyramidCodec
+   lookup_preset

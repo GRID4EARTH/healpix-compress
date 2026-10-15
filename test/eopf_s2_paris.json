@@ -1,0 +1,33 @@
+{
+  "input": {
+    "path": "s3://grid4earth/public/eopf-mirror/sentinel-2-l2a/S2C_MSIL2A_20250613T104641_N0511_R051_T31UDQ_20250613T134507.zarr",
+    "storage_options": {
+      "profile": "grid4earth",
+      "client_kwargs": {"endpoint_url": "https://s3.gra.io.cloud.ovh.net"}
+    },
+    "stac": {
+      "url": "https://stac.core.eopf.eodc.eu",
+      "collection": "sentinel-2-l2a",
+      "point": [2.33333, 48.866669],
+      "datetime": "2025-02-17/2025-10-01",
+      "query": {"eo:cloud_cover": {"lt": 10}, "view:sun_elevation": {"gt": 30}},
+      "item_id": "S2B_MSIL2A_20250929T105739_N0511_R094_T31UDQ_20250929T134908"
+    }
+  },
+  "product": "sentinel-2-l2a",
+  "group": "measurements/reflectance/r10m",
+  "bands": ["b04"],
+  "resampler": {
+    "init_params": {"Npt": 9, "threshold": 0.1},
+    "resample_params": {"lam": 0.1, "max_iter": 100, "tol": 1e-8}
+  },
+  "codec": {
+    "name": "hcc-sentinel2",
+    "configuration": {"effort": 7}
+  },
+  "output_extent": null,
+  "raw_reference": false,
+  "output": {
+    "dir": "results/eopf_s2_paris"
+  }
+}
