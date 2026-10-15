@@ -53,6 +53,8 @@ _VERSION = 1
 # coefficients, the base codestream, the detail codestream and the mask
 _HEADER = struct.Struct("<4sBBBBfiIIII")
 _FLAG_MASK = 1
+# the four children of a parent, as (row, column) offsets in the child raster
+_PHASES = ((0, 0), (0, 1), (1, 0), (1, 1))
 
 #: ``relative_step`` at which the added error matches the transfer error of
 #: the legacy-converters Sentinel-2 PSF preset, measured on B04 of tile T31UDQ.
@@ -86,25 +88,39 @@ def _replicate_coefficients(k: int) -> np.ndarray:
     return coef
 
 
-def _fit(base: np.ndarray, raster: np.ndarray, full: np.ndarray, k: int) -> np.ndarray:
-    """One least-squares filter per child phase, fitted on the fully valid parents."""
-    design = _design(base, k)
+def _fit(
+    base: np.ndarray,
+    raster: np.ndarray,
+    full: np.ndarray,
+    k: int,
+    design: np.ndarray | None = None,
+) -> np.ndarray:
+    """One least-squares filter per child phase, fitted on the fully valid parents.
+
+    The four phases share the design matrix: one solve with four right-hand sides.
+    """
+    if design is None:
+        design = _design(base, k)
     rows = full.ravel()
     if rows.sum() < design.shape[1]:
         return _replicate_coefficients(k)
-    coef = np.empty((4, design.shape[1]), dtype=np.float64)
-    for p, (di, dj) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1))):
-        target = raster[di::2, dj::2].ravel()[rows]
-        coef[p], *_ = np.linalg.lstsq(design[rows], target, rcond=None)
-    return coef.astype(np.float32)
+    targets = np.stack(
+        [raster[di::2, dj::2].ravel()[rows] for di, dj in _PHASES], axis=1
+    )
+    coef, *_ = np.linalg.lstsq(design[rows], targets, rcond=None)
+    return np.ascontiguousarray(coef.T).astype(np.float32)
 
 
-def _predict(base: np.ndarray, coef: np.ndarray, k: int) -> np.ndarray:
-    design = _design(base, k)
+def _predict(
+    base: np.ndarray, coef: np.ndarray, k: int, design: np.ndarray | None = None
+) -> np.ndarray:
+    if design is None:
+        design = _design(base, k)
     h = base.shape[0]
     pred = np.empty((2 * h, 2 * h), dtype=np.float64)
-    for p, (di, dj) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1))):
-        pred[di::2, dj::2] = (design @ coef[p].astype(np.float64)).reshape(h, h)
+    phases = design @ coef.astype(np.float64).T  # (h * h, 4)
+    for p, (di, dj) in enumerate(_PHASES):
+        pred[di::2, dj::2] = phases[:, p].reshape(h, h)
     return pred
 
 
@@ -194,8 +210,9 @@ def encode(
     base = _decoded_base(base_dn, q, o)
 
     k = predictor_size
-    coef = _fit(base, raster, count == 4, k)
-    pred = _predict(base, coef, k)
+    design = _design(base, k)
+    coef = _fit(base, raster, count == 4, k, design)
+    pred = _predict(base, coef, k, design)
 
     detail = (raster - pred) * q
     sigma = float(detail[valid].std()) if valid.any() else 0.0
