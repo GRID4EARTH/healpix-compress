@@ -118,9 +118,11 @@ def _predict(
         design = _design(base, k)
     h = base.shape[0]
     pred = np.empty((2 * h, 2 * h), dtype=np.float64)
-    phases = design @ coef.astype(np.float64).T  # (h * h, 4)
+    # one matrix-vector product per phase, not one matrix product for the four:
+    # the summation order then matches the decoder the existing streams were
+    # written for, bit for bit
     for p, (di, dj) in enumerate(_PHASES):
-        pred[di::2, dj::2] = phases[:, p].reshape(h, h)
+        pred[di::2, dj::2] = (design @ coef[p].astype(np.float64)).reshape(h, h)
     return pred
 
 
