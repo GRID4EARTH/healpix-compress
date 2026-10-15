@@ -146,3 +146,46 @@ class TestEncodeDecode:
         stream = sentinel2.encode(x)
 
         assert len(stream) < x.size * 2  # smaller than the raw uint16 raster
+
+
+class TestRows:
+    @pytest.mark.parametrize(
+        ["shape", "expectation"],
+        [
+            pytest.param((16,), nullcontext(), id="one-dimensional"),
+            pytest.param((1, 3, 16), nullcontext(), id="leading-axes"),
+            pytest.param((3, 12), pytest.raises(ValueError), id="not-power-of-four"),
+            pytest.param((), pytest.raises(ValueError), id="scalar"),
+        ],
+    )
+    def test_check_rows_shape(self, shape, expectation):
+        with expectation:
+            assert sentinel2.check_rows_shape(shape) == 2
+
+    @pytest.mark.parametrize("shape", [(16,), (3, 16), (2, 3, 16)])
+    def test_roundtrip(self, shape):
+        rng = np.random.default_rng(0)
+        cells = rng.uniform(0.0, 0.5, size=shape).astype("float32")
+
+        data = sentinel2.encode_rows(cells, sentinel2.encode)
+        actual = sentinel2.decode_rows(data, shape, sentinel2.decode)
+
+        assert actual.shape == shape
+        assert_equal(actual, sentinel2.dequantize(sentinel2.quantize(cells)))
+
+    def test_one_dimensional_is_the_codestream(self):
+        cells = np.linspace(0.0, 0.5, 16, dtype="float32")
+
+        actual = sentinel2.encode_rows(cells, sentinel2.encode)
+
+        assert actual == sentinel2.encode(cells)
+
+    @pytest.mark.parametrize(
+        "cut", [slice(0, 10), slice(0, -1)], ids=["truncated-header", "truncated-rows"]
+    )
+    def test_corrupt_chunk_is_rejected(self, cut):
+        cells = np.linspace(0.0, 0.5, 2 * 16, dtype="float32").reshape(2, 16)
+        data = sentinel2.encode_rows(cells, sentinel2.encode)
+
+        with pytest.raises(ValueError):
+            sentinel2.decode_rows(data[cut], (2, 16), sentinel2.decode)

@@ -15,7 +15,7 @@ The codec has two parameters:
 
 ## Sentinel-2 chain: digital numbers and lossless JPEG XL
 
-The `hcc-sentinel2` serializer stores a chunk of reflectances the way a Sentinel-2 product stores a band: the cells are rounded to 16-bit digital numbers, `DN = round(Q * reflectance - O)` with `DN = 0` for no-data, de-interleaved into a square raster and compressed with lossless JPEG XL. Decoding restores the quantised reflectances exactly, `(DN + O) / Q`; the rounding to the DN lattice is the only error. Chunks must be one-dimensional with a power-of-four size (one nested parent cell).
+The `hcc-sentinel2` serializer stores a chunk of reflectances the way a Sentinel-2 product stores a band: the cells are rounded to 16-bit digital numbers, `DN = round(Q * reflectance - O)` with `DN = 0` for no-data, de-interleaved into a square raster and compressed with lossless JPEG XL. Decoding restores the quantised reflectances exactly, `(DN + O) / Q`; the rounding to the DN lattice is the only error. The last axis of a chunk must have a power-of-four size (one nested parent cell); leading axes (time, band, ...) are allowed, each row being coded on its own.
 
 It needs the optional dependency `imagecodecs` (`pip install healpix-compress[jpegxl]`).
 

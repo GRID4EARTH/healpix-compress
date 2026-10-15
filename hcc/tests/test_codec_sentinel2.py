@@ -82,6 +82,49 @@ class TestHccSentinel2Codec:
         assert_equal(actual, expected)
 
     @pytest.mark.parametrize(
+        "chunks", [(1, 3, 4**3), (2, 1, 4**3)], ids=["per-time", "per-band"]
+    )
+    def test_zarr_roundtrip_leading_axes(self, chunks):
+        rng = np.random.default_rng(0)
+        data = rng.uniform(0.0, 0.5, size=(2, 3, 4**3)).astype("float32")
+        data[1, 2, 7] = np.nan
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                data=data,
+                chunks=chunks,
+                fill_value=np.nan,
+                serializer=codec_module.HccSentinel2Codec(effort=1),
+                filters=None,
+                compressors=None,
+            )
+
+            actual = z[:]
+
+        expected = sentinel2.dequantize(sentinel2.quantize(data))
+        assert_equal(actual, expected)
+
+    def test_one_dimensional_chunk_bytes_unchanged(self):
+        """1-D chunks keep the single-codestream format of existing stores."""
+        data = np.linspace(0.1, 0.4, 4**3, dtype="float32")
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            g.create_array(
+                "z",
+                data=data,
+                chunks=(4**3,),
+                serializer=codec_module.HccSentinel2Codec(effort=1),
+                filters=None,
+                compressors=None,
+            )
+            actual = bytes(store._store_dict["z/c/0"].to_bytes())
+
+        assert actual == sentinel2.encode(data, effort=1)
+
+    @pytest.mark.parametrize(
         ["dtype", "chunks", "expectation"],
         [
             pytest.param("float32", (16,), nullcontext(), id="valid"),
@@ -92,6 +135,13 @@ class TestHccSentinel2Codec:
                 pytest.raises(ValueError),
                 id="chunk-not-power-of-four",
             ),
+            pytest.param("float32", (2, 16), nullcontext(), id="leading-axis"),
+            pytest.param(
+                "float32",
+                (2, 12),
+                pytest.raises(ValueError),
+                id="leading-axis-not-power-of-four",
+            ),
         ],
     )
     def test_validate(self, dtype, chunks, expectation):
@@ -99,7 +149,7 @@ class TestHccSentinel2Codec:
             g = zarr.api.synchronous.create_group(store)
             g.create_array(
                 "z",
-                shape=(32,),
+                shape=(2, 32)[2 - len(chunks) :],
                 dtype=dtype,
                 chunks=chunks,
                 serializer=codec_module.HccSentinel2Codec(),

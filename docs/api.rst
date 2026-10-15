@@ -79,6 +79,9 @@ de-interleaving, lossless JPEG XL.
    encode
    decode
    check_chunk_shape
+   check_rows_shape
+   encode_rows
+   decode_rows
 
 Zarr serializer
 ---------------
