@@ -45,6 +45,16 @@ z = root.create_array(
 serializer = hcc.codecs.sentinel2_pyramid.HccSentinel2PyramidCodec(relative_step=0.36)
 ```
 
+## Wavelet residuals: `hcc-grad-dwt`
+
+`hcc-grad-dwt` codes the residual of `hcc-decompose` with a multi-level 2-D wavelet transform: the approximation subband is kept lossless (float32), each detail subband is quantised to int8 or int16 with its own scale. It needs the optional dependency PyWavelets (`pip install healpix-compress[wavelets]`).
+
+```python
+from hcc.codecs.presets import preset
+
+[serializer] = preset("hcc-grad-dwt", "medium")
+```
+
 ## Usage of the zarr codec
 
 ### Direct use with `zarr-python`

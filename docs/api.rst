@@ -58,6 +58,42 @@ Data
 
    QUALITY_PRESETS
 
+API Reference — grad_dwt
+========================
+
+.. currentmodule:: hcc.compression.grad_dwt
+
+.. automodule:: hcc.compression.grad_dwt
+   :no-members:
+   :no-undoc-members:
+
+Needs PyWavelets (``healpix-compress[wavelets]``).
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+   :template: function.rst
+
+   compress
+   decompress
+   compression_info
+   lookup_preset
+   compress_residuals
+   decompress_residuals
+   dwt_forward
+   dwt_inverse
+
+Zarr codec
+----------
+
+.. currentmodule:: hcc.codecs.grad_dwt
+
+.. autosummary::
+   :toctree: generated/
+
+   HccGradDwtCodec
+   lookup_preset
+
 API Reference — sentinel2
 =========================
 
