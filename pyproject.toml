@@ -1,7 +1,16 @@
 [project]
 name = "healpix-compress"
+description = "Zarr codecs for HEALPix-aligned chunks, including lossless and quantised Sentinel-2 serializers"
+readme = "README.md"
 requires-python = ">= 3.11"
 license = { text = "Apache-2.0" }
+authors = [{ name = "GRID4EARTH" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering",
+]
 dependencies = [
   "numpy>=2",
   "scipy",
@@ -14,6 +23,10 @@ dynamic = ["version"]
 jpegxl = ["imagecodecs"]
 # discrete wavelet transform for hcc-grad-dwt
 wavelets = ["PyWavelets"]
+
+[project.urls]
+Repository = "https://github.com/GRID4EARTH/healpix-compress"
+Issues = "https://github.com/GRID4EARTH/healpix-compress/issues"
 
 [project.entry-points."zarr.codecs"]
 hcc-dct = "hcc.codecs.dct:HccDctCodec"

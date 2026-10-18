@@ -1,0 +1,4 @@
+# Keep the source distribution to the package: the test data and notebooks of
+# test/ (tens of MB) and the prototype notebook are not needed to build or use it.
+prune test
+exclude prototype-codec.ipynb
