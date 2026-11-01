@@ -34,6 +34,13 @@ for an added error of about 1.5 times the transfer error.
 Cells that are ``NaN`` round-trip as ``NaN``: a parent without any valid
 child is the base's no-data number, and the validity of the children of the
 partially valid parents is stored as a bit mask.
+
+The JPEG XL and zlib streams go through imagecodecs and zlib. The rest of
+:func:`encode` and :func:`decode` runs in the optional native kernels when the
+package ``healpix-compress-native`` is installed (see
+:mod:`hcc.compression._native`), without holding the GIL; this module's
+Python implementation stays the reference, and the kernels reproduce it bit
+for bit.
 """
 
 from __future__ import annotations
@@ -44,7 +51,7 @@ import zlib
 import numpy as np
 import numpy.typing as npt
 
-from hcc.compression import sentinel2
+from hcc.compression import _native, sentinel2
 from hcc.compression.zorder import expand_tile, flatten_tile
 
 _MAGIC = b"HS2P"
@@ -65,21 +72,22 @@ TRANSFER_FLOOR_RELATIVE_STEP = 0.36
 #: the transfer error.
 DEFAULT_RELATIVE_STEP = 0.57
 
-
-def _neighbourhood(base: np.ndarray, k: int) -> np.ndarray:
-    """``(h * h, k * k)`` parent neighbourhoods, edge-padded."""
-    r = k // 2
-    p = np.pad(base, r, mode="edge")
-    h = base.shape[0]
-    feats = np.stack(
-        [p[i : i + h, j : j + h] for i in range(k) for j in range(k)], axis=-1
-    )
-    return feats.reshape(h * h, k * k)
+#: Default JPEG XL ``decoding_speed``: on Sentinel-2 B04 chunks at effort 7,
+#: about 3 % larger than ``0`` for half the JPEG XL encoding and decoding times.
+#: The decoded cells do not depend on it.
+DEFAULT_DECODING_SPEED = 2
 
 
 def _design(base: np.ndarray, k: int) -> np.ndarray:
-    feats = _neighbourhood(base, k)
-    return np.concatenate([feats, np.ones((feats.shape[0], 1))], axis=1)
+    """``(h * h, k * k + 1)``: the edge-padded parent neighbourhoods, then ones."""
+    h = base.shape[0]
+    p = np.pad(base, k // 2, mode="edge")
+    design = np.empty((h, h, k * k + 1))
+    # one copy of the k x k windows into the columns, no stacked temporaries
+    columns = design[..., : k * k].reshape(h, h, k, k)
+    columns[...] = np.lib.stride_tricks.sliding_window_view(p, (k, k))
+    design[..., k * k] = 1.0
+    return design.reshape(h * h, k * k + 1)
 
 
 def _replicate_coefficients(k: int) -> np.ndarray:
@@ -107,7 +115,11 @@ def _fit(
     targets = np.stack(
         [raster[di::2, dj::2].ravel()[rows] for di, dj in _PHASES], axis=1
     )
-    coef, *_ = np.linalg.lstsq(design[rows], targets, rcond=None)
+    return _solve(design[rows], targets)
+
+
+def _solve(design: np.ndarray, targets: np.ndarray) -> np.ndarray:
+    coef, *_ = np.linalg.lstsq(design, targets, rcond=None)
     return np.ascontiguousarray(coef.T).astype(np.float32)
 
 
@@ -135,6 +147,46 @@ def _decoded_base(base_dn: np.ndarray, q: float, o: float) -> np.ndarray:
     return np.where(finite, base, base[finite].mean() if finite.any() else 0.0)
 
 
+def _encode_layers(
+    cells: np.ndarray,
+    k: int,
+    q: float,
+    o: float,
+    relative_step: float,
+    min_step: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, int, bytes | None]:
+    """The base, the filters, the quantised detail with its step and offset, and
+    the packed validity bits of the children when some parents are partially valid."""
+    raster = expand_tile(cells)
+    h = raster.shape[0] // 2
+    valid = np.isfinite(raster)
+    vb = valid.reshape(h, 2, h, 2)
+    count = vb.sum(axis=(1, 3))
+    sums = np.where(valid, raster, 0.0).reshape(h, 2, h, 2).sum(axis=(1, 3))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.where(count > 0, sums / count, np.nan)
+    base_dn = sentinel2.quantize(mean, quantification_value=q, add_offset=o)
+    base = _decoded_base(base_dn, q, o)
+
+    design = _design(base, k)
+    coef = _fit(base, raster, count == 4, k, design)
+    pred = _predict(base, coef, k, design)
+
+    detail = raster - pred
+    detail *= q
+    sigma = float(detail[valid].std()) if valid.any() else 0.0
+    step = float(np.float32(max(min_step, relative_step * sigma)))
+    detail /= step
+    r = np.where(valid, np.rint(detail), 0).astype(np.int64)
+    offset = int(r.min())
+    r -= offset
+    r16 = np.clip(r, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+
+    partial = (count > 0) & (count < 4)
+    mask_bits = np.packbits(valid.ravel()).tobytes() if partial.any() else None
+    return base_dn, coef, r16, step, offset, mask_bits
+
+
 def encode(
     cells: npt.NDArray[np.floating],
     *,
@@ -144,6 +196,7 @@ def encode(
     quantification_value: float = sentinel2.DEFAULT_QUANTIFICATION_VALUE,
     add_offset: float = sentinel2.DEFAULT_ADD_OFFSET,
     effort: int = 7,
+    decoding_speed: int = DEFAULT_DECODING_SPEED,
 ) -> bytes:
     """Compress one nested chunk of reflectances into a base and a quantised detail.
 
@@ -165,6 +218,14 @@ def encode(
         ``BOA_ADD_OFFSET``).
     effort : int, default 7
         JPEG XL encoder effort in :math:`[1, 9]`.
+    decoding_speed : int, default 2
+        JPEG XL decoding speed tier in :math:`[0, 4]`: higher restricts the
+        encoder to tools that decode faster, for a larger codestream. The
+        JPEG XL layers are lossless, so the decoded cells do not depend on it
+        (nor on ``effort``). On Sentinel-2 B04 chunks at effort 7, ``0`` (the
+        only setting before) is the smallest, ``1`` keeps that size and cuts
+        both the JPEG XL encoding and decoding times by about a third, ``2``
+        adds about 3 % to the size and halves them.
 
     Returns
     -------
@@ -198,43 +259,33 @@ def encode(
         )
     if not 1 <= effort <= 9:
         raise ValueError(f"effort must be in [1, 9], got {effort!r}")
+    if not 0 <= decoding_speed <= 4:
+        raise ValueError(f"decoding_speed must be in [0, 4], got {decoding_speed!r}")
     q, o = float(quantification_value), float(add_offset)
-
-    raster = expand_tile(cells)
-    h = raster.shape[0] // 2
-    valid = np.isfinite(raster)
-    vb = valid.reshape(h, 2, h, 2)
-    count = vb.sum(axis=(1, 3))
-    sums = np.where(valid, raster, 0.0).reshape(h, 2, h, 2).sum(axis=(1, 3))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        mean = np.where(count > 0, sums / count, np.nan)
-    base_dn = sentinel2.quantize(mean, quantification_value=q, add_offset=o)
-    base = _decoded_base(base_dn, q, o)
-
     k = predictor_size
-    design = _design(base, k)
-    coef = _fit(base, raster, count == 4, k, design)
-    pred = _predict(base, coef, k, design)
 
-    detail = (raster - pred) * q
-    sigma = float(detail[valid].std()) if valid.any() else 0.0
-    step = np.float32(max(min_step, relative_step * sigma))
-    r = np.where(valid, np.rint(detail / float(step)), 0).astype(np.int64)
-    offset = int(r.min())
-    r16 = np.clip(r - offset, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+    native = _native.module
+    if native is None:
+        base_dn, coef, r16, step, offset, mask_bits = _encode_layers(
+            cells, k, q, o, relative_step, min_step
+        )
+    else:
+        enc = native.PyramidEncoder(np.ascontiguousarray(cells), k, q, o)
+        system = enc.fit_system()
+        coef = _replicate_coefficients(k) if system is None else _solve(*system)
+        r16, step, offset, mask_bits = enc.finish(coef, relative_step, min_step)
+        base_dn = enc.base_dn()
 
-    partial = (count > 0) & (count < 4)
-    flags = _FLAG_MASK if partial.any() else 0
-    mask = zlib.compress(np.packbits(valid.ravel()).tobytes(), 9) if flags else b""
+    flags = _FLAG_MASK if mask_bits is not None else 0
+    mask = zlib.compress(mask_bits, 9) if flags else b""
 
     jxl = sentinel2._jpegxl()
+    options = dict(lossless=True, effort=effort)
+    if decoding_speed:
+        options["decodingspeed"] = decoding_speed
     coef_bytes = coef.tobytes()
-    base_bytes = bytes(
-        jxl.jpegxl_encode(np.ascontiguousarray(base_dn), lossless=True, effort=effort)
-    )
-    detail_bytes = bytes(
-        jxl.jpegxl_encode(np.ascontiguousarray(r16), lossless=True, effort=effort)
-    )
+    base_bytes = bytes(jxl.jpegxl_encode(np.ascontiguousarray(base_dn), **options))
+    detail_bytes = bytes(jxl.jpegxl_encode(np.ascontiguousarray(r16), **options))
     header = _HEADER.pack(
         _MAGIC,
         _VERSION,
@@ -348,15 +399,42 @@ def decode(
         jxl.jpegxl_decode(stream[pos : pos + info["detail_bytes"]])
     ).reshape(2 * h, 2 * h)
     pos += info["detail_bytes"]
+    mask_bits = (
+        zlib.decompress(stream[pos : pos + info["mask_bytes"]])
+        if info["has_mask"]
+        else None
+    )
 
-    pred = _predict(_decoded_base(base_dn, q, o), coef, k)
-    raster = pred + (r16.astype(np.int64) + info["offset"]) * info["step"] / q
-
-    valid = np.repeat(np.repeat(base_dn != sentinel2.NODATA_DN, 2, axis=0), 2, axis=1)
-    if info["has_mask"]:
-        bits = np.frombuffer(
-            zlib.decompress(stream[pos : pos + info["mask_bytes"]]), dtype=np.uint8
+    native = _native.module
+    if native is not None and dtype in (np.float32, np.float64):
+        return native.pyramid_decode(
+            np.ascontiguousarray(base_dn, dtype=np.uint16),
+            np.ascontiguousarray(r16, dtype=np.uint16),
+            coef.copy(),
+            k,
+            info["offset"],
+            info["step"],
+            q,
+            o,
+            mask_bits,
+            dtype == np.float32,
         )
-        valid &= np.unpackbits(bits)[: valid.size].reshape(valid.shape).astype(bool)
+
+    raster = _predict(_decoded_base(base_dn, q, o), coef, k)
+    # pred + (r16 + offset) * step / q, in place, rounded as numpy does it
+    residual = r16.astype(np.float64)
+    residual += info["offset"]
+    residual *= info["step"]
+    residual /= q
+    raster += residual
+
+    valid = np.broadcast_to(
+        (base_dn != sentinel2.NODATA_DN)[:, None, :, None], (h, 2, h, 2)
+    ).reshape(2 * h, 2 * h)
+    if mask_bits is not None:
+        bits = np.frombuffer(mask_bits, dtype=np.uint8)
+        valid = valid & np.unpackbits(bits, count=valid.size).reshape(valid.shape).view(
+            bool
+        )
     raster[~valid] = np.nan
-    return flatten_tile(raster).astype(dtype)
+    return flatten_tile(raster).astype(dtype, copy=False)
