@@ -55,6 +55,13 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         ``BOA_ADD_OFFSET``).
     effort : int, default 7
         JPEG XL encoder effort in :math:`[1, 9]`.
+    decoding_speed : int, default 2
+        JPEG XL decoding speed tier in :math:`[0, 4]`; higher decodes faster,
+        for larger chunks, and the decoded cells do not depend on it. The
+        default is about 3 % larger than ``0`` for half the JPEG XL encoding
+        and decoding times. It is written to ``zarr.json`` only when it is not
+        the default, so that the metadata of the default stays readable by
+        earlier versions (which only decode, the same way, whatever it was).
 
     See Also
     --------
@@ -76,6 +83,7 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
     quantification_value: float = sentinel2.DEFAULT_QUANTIFICATION_VALUE
     add_offset: float = sentinel2.DEFAULT_ADD_OFFSET
     effort: int = 7
+    decoding_speed: int = sentinel2_pyramid.DEFAULT_DECODING_SPEED
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -113,17 +121,17 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
         >>> HccSentinel2PyramidCodec().to_dict()["name"]
         'hcc-sentinel2-pyramid'
         """
-        return {
-            "name": self.name,
-            "configuration": {
-                "relative_step": float(self.relative_step),
-                "min_step": float(self.min_step),
-                "predictor_size": int(self.predictor_size),
-                "quantification_value": float(self.quantification_value),
-                "add_offset": float(self.add_offset),
-                "effort": int(self.effort),
-            },
+        configuration = {
+            "relative_step": float(self.relative_step),
+            "min_step": float(self.min_step),
+            "predictor_size": int(self.predictor_size),
+            "quantification_value": float(self.quantification_value),
+            "add_offset": float(self.add_offset),
+            "effort": int(self.effort),
         }
+        if self.decoding_speed != sentinel2_pyramid.DEFAULT_DECODING_SPEED:
+            configuration["decoding_speed"] = int(self.decoding_speed)
+        return {"name": self.name, "configuration": configuration}
 
     def validate(self, *, shape, dtype, chunk_grid) -> None:
         """Reject arrays this codec cannot store.
@@ -191,6 +199,7 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
                 quantification_value=self.quantification_value,
                 add_offset=self.add_offset,
                 effort=self.effort,
+                decoding_speed=self.decoding_speed,
             ),
         )
         return chunk_spec.prototype.buffer.from_bytes(stream)

@@ -46,6 +46,19 @@ class TestEncodeDecode:
         # half the step in digital numbers, plus float rounding
         assert np.abs(actual - cells).max() <= 0.5 * step * 1e-4 + 1e-9
 
+    @pytest.mark.parametrize("decoding_speed", [1, 2, 4])
+    def test_decoding_speed_does_not_change_the_cells(self, decoding_speed):
+        cells = _field(6)
+        cells[:40] = np.nan
+        reference = pyramid.encode(cells, decoding_speed=0)
+        expected = pyramid.decode(reference, dtype="float64")
+
+        stream = pyramid.encode(cells, decoding_speed=decoding_speed)
+        actual = pyramid.decode(stream, dtype="float64")
+
+        assert stream != reference
+        assert_equal(actual.view("u8"), expected.view("u8"))
+
     def test_coarser_step_gives_smaller_stream(self):
         cells = _field(6)
 
@@ -105,6 +118,9 @@ class TestEncodeDecode:
                 {"min_step": 0.0}, pytest.raises(ValueError), id="zero-min-step"
             ),
             pytest.param({"effort": 0}, pytest.raises(ValueError), id="effort-too-low"),
+            pytest.param(
+                {"decoding_speed": 5}, pytest.raises(ValueError), id="decoding-speed-too-high"
+            ),
         ],
     )
     def test_parameters(self, kwargs, expectation):

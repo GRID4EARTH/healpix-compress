@@ -45,6 +45,16 @@ z = root.create_array(
 serializer = hcc.codecs.sentinel2_pyramid.HccSentinel2PyramidCodec(relative_step=0.36)
 ```
 
+The JPEG XL layers are lossless, so `effort` and `decoding_speed` change the size and the speed of the chunks, not the decoded cells. On Sentinel-2 B04 chunks at effort 7, the default `decoding_speed=2` makes the chunks about 3 % larger than `decoding_speed=0` (the only setting of earlier versions) for half the JPEG XL encoding and decoding times; `decoding_speed=1` keeps the size of `0` and saves about a third.
+
+#### Native kernels
+
+The optional package in [`rust/`](rust/) (`healpix-compress-native`, module `hcc_native`, Rust and pyo3) runs everything but the JPEG XL and zlib streams and the least-squares fit natively, without holding the GIL. It gives the same codestreams and the same decoded cells as the Python implementation, bit for bit; the codec uses it when it is installed, unless `HCC_NATIVE=0`. It is built with a Rust toolchain and maturin:
+
+```bash
+pip install ./rust
+```
+
 ## Wavelet residuals: `hcc-grad-dwt`
 
 `hcc-grad-dwt` codes the residual of `hcc-decompose` with a multi-level 2-D wavelet transform: the approximation subband is kept lossless (float32), each detail subband is quantised to int8 or int16 with its own scale. It needs the optional dependency PyWavelets (`pip install healpix-compress[wavelets]`).

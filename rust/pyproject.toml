@@ -1,0 +1,19 @@
+[project]
+name = "healpix-compress-native"
+description = "Optional native (Rust) kernels for the hcc-sentinel2-pyramid codec of healpix-compress"
+requires-python = ">= 3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "GRID4EARTH" }]
+dependencies = ["numpy>=2"]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/GRID4EARTH/healpix-compress"
+
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "hcc_native"
+features = ["pyo3/extension-module"]

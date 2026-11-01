@@ -32,3 +32,6 @@ pixi.lock
 
 # outputs of test/eopf_s2_to_healpix.py (source cache, converted stores, sizes)
 /test/results/
+
+# rust build
+/rust/target/

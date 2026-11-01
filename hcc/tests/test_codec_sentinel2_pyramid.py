@@ -18,6 +18,8 @@ class TestHccSentinel2PyramidCodec:
             pytest.param({}, id="defaults"),
             pytest.param({"relative_step": 0.0, "min_step": 2.0}, id="fixed-step"),
             pytest.param({"predictor_size": 3, "effort": 3}, id="small-predictor"),
+            pytest.param({"decoding_speed": 0}, id="decoding-speed-0"),
+            pytest.param({"decoding_speed": 4}, id="decoding-speed-4"),
         ],
     )
     def test_serialization_roundtrip(self, kwargs):
@@ -26,6 +28,12 @@ class TestHccSentinel2PyramidCodec:
         actual = codec_module.HccSentinel2PyramidCodec.from_dict(codec.to_dict())
 
         assert actual == codec
+
+    def test_default_decoding_speed_is_not_written(self):
+        # keeps the metadata of the default readable by earlier versions
+        configuration = codec_module.HccSentinel2PyramidCodec().to_dict()["configuration"]
+
+        assert "decoding_speed" not in configuration
 
     def test_default_relative_step(self):
         actual = codec_module.HccSentinel2PyramidCodec().relative_step
