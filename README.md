@@ -39,13 +39,13 @@ z = root.create_array(
 
 ### Two-layer variant: lossless parents, quantised children
 
-`hcc-sentinel2-pyramid` keeps the parent level (the mean of each group of four children) lossless on the DN lattice, predicts the children from it with a least-squares filter over the 5 x 5 parent neighbourhood, and quantises the difference with a step proportional to that difference's standard deviation in the chunk (`relative_step`). Rough chunks get a coarse step and smooth chunks a fine one. For Sentinel-2 B04 resampled with the PSF settings of legacy-converters, `relative_step=0.36` (the `transfer-floor` preset) puts the error it adds on the native pixels at the error the transfer itself leaves there; `relative_step=0` keeps the children on the DN lattice.
+`hcc-sentinel2-pyramid` keeps the parent level (the mean of each group of four children) lossless on the DN lattice, predicts the children from it with a least-squares filter over the 5 x 5 parent neighbourhood, and quantises the difference with a step proportional to that difference's standard deviation in the chunk (`relative_step`). Rough chunks get a coarse step and smooth chunks a fine one. For a 10 m reflectance band resampled with a point-spread-function kernel, `relative_step=0.36` (the `transfer-floor` preset) puts the error it adds on the native pixels at the error the transfer itself leaves there; `relative_step=0` keeps the children on the DN lattice.
 
 ```python
 serializer = hcc.codecs.sentinel2_pyramid.HccSentinel2PyramidCodec(relative_step=0.36)
 ```
 
-The JPEG XL layers are lossless, so `effort` and `decoding_speed` change the size and the speed of the chunks, not the decoded cells. On Sentinel-2 B04 chunks at effort 7, the default `decoding_speed=2` makes the chunks about 3 % larger than `decoding_speed=0` (the only setting of earlier versions) for half the JPEG XL encoding and decoding times; `decoding_speed=1` keeps the size of `0` and saves about a third.
+The JPEG XL layers are lossless, so `effort` and `decoding_speed` change the size and the speed of the chunks, not the decoded cells. On 10 m reflectance chunks at effort 7, the default `decoding_speed=2` makes the chunks about 3 % larger than `decoding_speed=0` (the only setting of earlier versions) for half the JPEG XL encoding and decoding times; `decoding_speed=1` keeps the size of `0` and saves about a third.
 
 #### Native kernels
 
