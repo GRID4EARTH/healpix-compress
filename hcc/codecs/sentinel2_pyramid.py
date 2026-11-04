@@ -39,8 +39,8 @@ class HccSentinel2PyramidCodec(ArrayBytesCodec):
     ----------
     relative_step : float, default 0.57
         The detail step as a fraction of the chunk's detail standard deviation;
-        ``0`` uses ``min_step``. For Sentinel-2 B04 resampled with the
-        legacy-converters PSF preset, the default gives about 1.3 times the
+        ``0`` uses ``min_step``. For a 10 m reflectance band resampled with
+        a point-spread-function kernel, the default gives about 1.3 times the
         native tile under lossless JPEG 2000, for an added error of about 1.5
         times the transfer error; ``0.36`` puts the added error at the
         transfer error, for about 1.5 times the native size.
@@ -213,7 +213,7 @@ def lookup_preset(name: str) -> list[HccSentinel2PyramidCodec]:
     name : {'default', 'transfer-floor', 'lossless'}
         ``'default'`` is the codec's defaults (``relative_step=0.57``, about
         1.3 times the native size); ``'transfer-floor'`` adds an error close to
-        the transfer error of the legacy-converters Sentinel-2 PSF preset
+        the transfer error of a point-spread-function resampling
         (``relative_step=0.36``); ``'lossless'`` keeps the children on the
         digital-number lattice.
 

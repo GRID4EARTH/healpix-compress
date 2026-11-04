@@ -20,8 +20,8 @@ The step is set per chunk from the detail itself,
 deviation of the detail in digital numbers and :math:`r` the
 ``relative_step``. Rough chunks get a coarse step and smooth chunks a fine
 one, which is what an error budget proportional to the local transfer error
-asks for: for Sentinel-2 B04 resampled with the PSF settings of
-legacy-converters, the error the transfer itself leaves on the native pixels
+asks for: for a 10 m reflectance band resampled to HEALPix with a
+point-spread-function kernel, the error the transfer itself leaves on the native pixels
 is close to :math:`0.058 \\sigma`, and the quantisation adds about
 :math:`0.16 s` there, so :math:`r \\approx 0.36` puts the added error at the
 transfer error, for a size of about 1.5 times the native tile under lossless
@@ -64,7 +64,7 @@ _FLAG_MASK = 1
 _PHASES = ((0, 0), (0, 1), (1, 0), (1, 1))
 
 #: ``relative_step`` at which the added error matches the transfer error of
-#: the legacy-converters Sentinel-2 PSF preset, measured on B04 of tile T31UDQ.
+#: a point-spread-function resampling, measured on one 10 m reflectance band.
 TRANSFER_FLOOR_RELATIVE_STEP = 0.36
 
 #: Default ``relative_step``: about 1.3 times the native tile under lossless
@@ -72,7 +72,7 @@ TRANSFER_FLOOR_RELATIVE_STEP = 0.36
 #: the transfer error.
 DEFAULT_RELATIVE_STEP = 0.57
 
-#: Default JPEG XL ``decoding_speed``: on Sentinel-2 B04 chunks at effort 7,
+#: Default JPEG XL ``decoding_speed``: on 10 m reflectance chunks at effort 7,
 #: about 3 % larger than ``0`` for half the JPEG XL encoding and decoding times.
 #: The decoded cells do not depend on it.
 DEFAULT_DECODING_SPEED = 2
@@ -222,7 +222,7 @@ def encode(
         JPEG XL decoding speed tier in :math:`[0, 4]`: higher restricts the
         encoder to tools that decode faster, for a larger codestream. The
         JPEG XL layers are lossless, so the decoded cells do not depend on it
-        (nor on ``effort``). On Sentinel-2 B04 chunks at effort 7, ``0`` (the
+        (nor on ``effort``). On 10 m reflectance chunks at effort 7, ``0`` (the
         only setting before) is the smallest, ``1`` keeps that size and cuts
         both the JPEG XL encoding and decoding times by about a third, ``2``
         adds about 3 % to the size and halves them.
