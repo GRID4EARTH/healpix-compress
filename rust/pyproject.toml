@@ -1,6 +1,6 @@
 [project]
 name = "healpix-compress-native"
-description = "Optional native (Rust) kernels for the hcc-sentinel2-pyramid codec of healpix-compress"
+description = "Optional native (Rust) kernels for the hcc-uint16-jxl-pyramid codec of healpix-compress"
 requires-python = ">= 3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "GRID4EARTH" }]

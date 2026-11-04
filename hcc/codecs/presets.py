@@ -36,13 +36,23 @@ def preset(codec: str, name: str) -> list[Codec]:
             from hcc.codecs.grad_dwt import lookup_preset
 
             return lookup_preset(name)
+        case "hcc-uint16-jxl":
+            from hcc.codecs.uint16_jxl import lookup_preset
+
+            return lookup_preset(name)
+        case "hcc-uint16-jxl-pyramid":
+            from hcc.codecs.uint16_jxl_pyramid import lookup_preset
+
+            return lookup_preset(name)
         case "hcc-sentinel2":
-            from hcc.codecs.sentinel2 import lookup_preset
+            # the id before 0.5.0
+            from hcc.codecs._aliases import lookup_preset
 
             return lookup_preset(name)
         case "hcc-sentinel2-pyramid":
-            from hcc.codecs.sentinel2_pyramid import lookup_preset
+            # the id before 0.5.0
+            from hcc.codecs._aliases import lookup_pyramid_preset
 
-            return lookup_preset(name)
+            return lookup_pyramid_preset(name)
         case _:
             raise ValueError(f"unknown codec: {codec}")
