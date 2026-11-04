@@ -1,8 +1,8 @@
 name: Tests
 
-# Runs hcc/tests twice on each platform: first with the Python implementation
-# only (healpix-compress-native not installed), then with the native kernels
-# built from rust/ by maturin. With the native package installed, the native
+# Runs hcc/tests twice: first with the Python implementation only
+# (healpix-compress-native not installed), then with the native kernels built
+# from rust/ by maturin. With the native package installed, the native
 # tests compare both paths bit for bit in the same process, and the other
 # tests run the codec on the native kernels.
 
@@ -25,22 +25,16 @@ jobs:
   tests:
     name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
-    # macOS arm64 reports its result without failing the workflow: its BLAS
-    # may sum the decoder's prediction in another order than the native kernels
-    continue-on-error: ${{ matrix.informational }}
     permissions:
       contents: read
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.13"
-            informational: false
-          - os: macos-latest
-            python-version: "3.13"
-            informational: true
+        # Linux x86_64 only: on other platforms numpy's BLAS can sum the
+        # decoder's prediction in another order than the native kernels
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.13"]
 
     steps:
       - name: Checkout
