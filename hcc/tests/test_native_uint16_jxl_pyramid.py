@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from hcc.compression import _native
-from hcc.compression import sentinel2_pyramid as pyramid
+from hcc.compression import uint16_jxl_pyramid as pyramid
 from hcc.compression.zorder import flatten_tile
 
 pytest.importorskip("imagecodecs")

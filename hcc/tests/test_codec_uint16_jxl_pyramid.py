@@ -5,13 +5,13 @@ import pytest
 import zarr
 from numpy.testing import assert_equal
 
-from hcc.codecs import sentinel2_pyramid as codec_module
-from hcc.compression import sentinel2_pyramid
+from hcc.codecs import uint16_jxl_pyramid as codec_module
+from hcc.compression import uint16_jxl_pyramid
 
 pytest.importorskip("imagecodecs")
 
 
-class TestHccSentinel2PyramidCodec:
+class TestHccUint16JxlPyramidCodec:
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -20,32 +20,36 @@ class TestHccSentinel2PyramidCodec:
             pytest.param({"predictor_size": 3, "effort": 3}, id="small-predictor"),
             pytest.param({"decoding_speed": 0}, id="decoding-speed-0"),
             pytest.param({"decoding_speed": 4}, id="decoding-speed-4"),
+            pytest.param({"out_of_range": "clip"}, id="out-of-range"),
         ],
     )
     def test_serialization_roundtrip(self, kwargs):
-        codec = codec_module.HccSentinel2PyramidCodec(**kwargs)
+        codec = codec_module.HccUint16JxlPyramidCodec(**kwargs)
 
-        actual = codec_module.HccSentinel2PyramidCodec.from_dict(codec.to_dict())
+        actual = codec_module.HccUint16JxlPyramidCodec.from_dict(codec.to_dict())
 
         assert actual == codec
 
     def test_default_decoding_speed_is_not_written(self):
         # keeps the metadata of the default readable by earlier versions
-        configuration = codec_module.HccSentinel2PyramidCodec().to_dict()["configuration"]
+        configuration = codec_module.HccUint16JxlPyramidCodec().to_dict()[
+            "configuration"
+        ]
 
         assert "decoding_speed" not in configuration
+        assert "out_of_range" not in configuration
 
     def test_default_relative_step(self):
-        actual = codec_module.HccSentinel2PyramidCodec().relative_step
+        actual = codec_module.HccUint16JxlPyramidCodec().relative_step
 
-        assert actual == sentinel2_pyramid.DEFAULT_RELATIVE_STEP == 0.57
+        assert actual == uint16_jxl_pyramid.DEFAULT_RELATIVE_STEP == 0.57
 
     @pytest.mark.parametrize(
         ["name", "expected"],
         [
-            pytest.param("hcc-sentinel2", "hcc-sentinel2", id="lossless"),
+            pytest.param("hcc-uint16-jxl", "hcc-uint16-jxl", id="lossless"),
             pytest.param(
-                "hcc-sentinel2-pyramid", "hcc-sentinel2-pyramid", id="pyramid"
+                "hcc-uint16-jxl-pyramid", "hcc-uint16-jxl-pyramid", id="pyramid"
             ),
         ],
     )
@@ -77,7 +81,7 @@ class TestHccSentinel2PyramidCodec:
         rng = np.random.default_rng(0)
         data = (0.2 + 0.05 * rng.standard_normal(3 * 4**4)).astype(dtype)
         data[7] = np.nan
-        codec = codec_module.HccSentinel2PyramidCodec(relative_step=0.5, effort=1)
+        codec = codec_module.HccUint16JxlPyramidCodec(relative_step=0.5, effort=1)
 
         with zarr.storage.MemoryStore() as store:
             g = zarr.api.synchronous.create_group(store)
@@ -96,8 +100,8 @@ class TestHccSentinel2PyramidCodec:
 
         expected = np.concatenate(
             [
-                sentinel2_pyramid.decode(
-                    sentinel2_pyramid.encode(
+                uint16_jxl_pyramid.decode(
+                    uint16_jxl_pyramid.encode(
                         data[i : i + 4**4], relative_step=0.5, effort=1
                     ),
                     dtype=dtype,
@@ -112,7 +116,7 @@ class TestHccSentinel2PyramidCodec:
         rng = np.random.default_rng(0)
         data = (0.2 + 0.05 * rng.standard_normal((2, 3, 4**4))).astype("float32")
         data[0, 1, 7] = np.nan
-        codec = codec_module.HccSentinel2PyramidCodec(relative_step=0.5, effort=1)
+        codec = codec_module.HccUint16JxlPyramidCodec(relative_step=0.5, effort=1)
 
         with zarr.storage.MemoryStore() as store:
             g = zarr.api.synchronous.create_group(store)
@@ -130,8 +134,8 @@ class TestHccSentinel2PyramidCodec:
 
         expected = np.stack(
             [
-                sentinel2_pyramid.decode(
-                    sentinel2_pyramid.encode(row, relative_step=0.5, effort=1)
+                uint16_jxl_pyramid.decode(
+                    uint16_jxl_pyramid.encode(row, relative_step=0.5, effort=1)
                 )
                 for row in data.reshape(-1, 4**4)
             ]
@@ -148,13 +152,13 @@ class TestHccSentinel2PyramidCodec:
                 "z",
                 data=data,
                 chunks=(4**4,),
-                serializer=codec_module.HccSentinel2PyramidCodec(effort=1),
+                serializer=codec_module.HccUint16JxlPyramidCodec(effort=1),
                 filters=None,
                 compressors=None,
             )
             actual = bytes(store._store_dict["z/c/0"].to_bytes())
 
-        assert actual == sentinel2_pyramid.encode(data, effort=1)
+        assert actual == uint16_jxl_pyramid.encode(data, effort=1)
 
     @pytest.mark.parametrize(
         ["dtype", "chunks", "expectation"],
@@ -189,7 +193,7 @@ class TestHccSentinel2PyramidCodec:
                 shape=(2, 32)[2 - len(chunks) :],
                 dtype=dtype,
                 chunks=chunks,
-                serializer=codec_module.HccSentinel2PyramidCodec(),
+                serializer=codec_module.HccUint16JxlPyramidCodec(),
                 filters=None,
                 compressors=None,
             )

@@ -1,6 +1,6 @@
 [project]
 name = "healpix-compress"
-description = "Zarr codecs for HEALPix-aligned chunks, including lossless and quantised Sentinel-2 serializers"
+description = "Zarr codecs for HEALPix-aligned chunks, including lossless and quantised serializers for 16-bit integer data"
 readme = "README.md"
 requires-python = ">= 3.11"
 license = { text = "Apache-2.0" }
@@ -19,7 +19,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-# lossless JPEG XL for the Sentinel-2 chain (hcc-sentinel2, hcc-sentinel2-pyramid)
+# lossless JPEG XL for the 16-bit serializers (hcc-uint16-jxl, hcc-uint16-jxl-pyramid)
 jpegxl = ["imagecodecs"]
 # discrete wavelet transform for hcc-grad-dwt
 wavelets = ["PyWavelets"]
@@ -33,8 +33,11 @@ hcc-dct = "hcc.codecs.dct:HccDctCodec"
 hcc-grad-dct = "hcc.codecs.grad_dct:HccGradDctCodec"
 hcc-grad-dwt = "hcc.codecs.grad_dwt:HccGradDwtCodec"
 hcc-decompose = "hcc.codecs.decompose:HccDecomposeCodec"
-hcc-sentinel2 = "hcc.codecs.sentinel2:HccSentinel2Codec"
-hcc-sentinel2-pyramid = "hcc.codecs.sentinel2_pyramid:HccSentinel2PyramidCodec"
+hcc-uint16-jxl = "hcc.codecs.uint16_jxl:HccUint16JxlCodec"
+hcc-uint16-jxl-pyramid = "hcc.codecs.uint16_jxl_pyramid:HccUint16JxlPyramidCodec"
+# the ids before 0.5.0, so that existing stores still open
+hcc-sentinel2 = "hcc.codecs._aliases:LegacyHccUint16JxlCodec"
+hcc-sentinel2-pyramid = "hcc.codecs._aliases:LegacyHccUint16JxlPyramidCodec"
 
 [build-system]
 requires = ["setuptools>=64.0", "setuptools-scm"]

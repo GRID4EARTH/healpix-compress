@@ -1,4 +1,4 @@
-"""The optional native kernels of :mod:`hcc.compression.sentinel2_pyramid`.
+"""The optional native kernels of :mod:`hcc.compression.uint16_jxl_pyramid`.
 
 They come with the separate package ``healpix-compress-native`` (module
 ``hcc_native``, built from ``rust/`` in this repository). When it is not
