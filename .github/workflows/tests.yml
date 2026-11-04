@@ -1,0 +1,73 @@
+name: Tests
+
+# Runs hcc/tests twice on each platform: first with the Python implementation
+# only (healpix-compress-native not installed), then with the native kernels
+# built from rust/ by maturin. With the native package installed, the native
+# tests compare both paths bit for bit in the same process, and the other
+# tests run the codec on the native kernels.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    # macOS arm64 reports its result without failing the workflow: its BLAS
+    # may sum the decoder's prediction in another order than the native kernels
+    continue-on-error: ${{ matrix.informational }}
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
+            informational: false
+          - os: macos-latest
+            python-version: "3.13"
+            informational: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # setuptools-scm reads the version from the tags
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install healpix-compress and the test dependencies
+        run: |
+          python -m pip install -e ".[jpegxl,wavelets]" pytest pytest-asyncio hypothesis
+          python -m pip list
+      - name: Run the tests (Python implementation)
+        env:
+          HCC_NATIVE: "0"
+        run: python -m pytest hcc/tests -rs
+
+      - name: Build and install the native kernels
+        run: |
+          rustc --version
+          cargo --version
+          python -m pip install -v ./rust
+      - name: Check that the codec uses the native kernels
+        run: |
+          python -c "import imagecodecs, hcc_native; from hcc.compression import _native; assert _native.module is hcc_native, 'hcc_native is installed but not used'"
+      - name: Run the tests (native kernels)
+        run: python -m pytest hcc/tests -rs
