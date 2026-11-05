@@ -5,4 +5,5 @@ healpix-compress
    :maxdepth: 2
    :caption: Contents
 
+   caveats
    api
