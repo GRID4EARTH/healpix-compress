@@ -25,6 +25,7 @@ jpegxl = ["imagecodecs"]
 wavelets = ["PyWavelets"]
 
 [project.urls]
+Documentation = "https://grid4earth.eu/healpix-compress/"
 Repository = "https://github.com/GRID4EARTH/healpix-compress"
 Issues = "https://github.com/GRID4EARTH/healpix-compress/issues"
 

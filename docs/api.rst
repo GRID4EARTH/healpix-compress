@@ -1,3 +1,13 @@
+API Reference — hcc
+===================
+
+.. currentmodule:: hcc
+
+.. autosummary::
+   :toctree: generated/
+
+   preset
+
 API Reference — grad_dct
 ========================
 
@@ -49,15 +59,6 @@ Used internally by the encoder/decoder; exposed for testing and experimentation.
    upsample
    local_std
 
-Data
-----
-
-.. autosummary::
-   :toctree: generated/
-   :nosignatures:
-
-   QUALITY_PRESETS
-
 API Reference — grad_dwt
 ========================
 
@@ -103,8 +104,8 @@ API Reference — sentinel2
    :no-members:
    :no-undoc-members:
 
-The Sentinel-2 product chain on a nested chunk: digital numbers, Morton
-de-interleaving, lossless JPEG XL.
+A nested chunk rounded to 16-bit integers with a scale and an offset,
+de-interleaved from Morton order and stored with lossless JPEG XL.
 
 .. autosummary::
    :toctree: generated/
