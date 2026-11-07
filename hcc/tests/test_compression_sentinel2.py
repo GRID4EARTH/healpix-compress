@@ -180,6 +180,45 @@ class TestRows:
 
         assert actual == sentinel2.encode(cells)
 
+    @pytest.mark.parametrize("shape", [(1, 16), (1, 1, 16)])
+    def test_single_row_reads_the_one_dimensional_codestream(self, shape):
+        rng = np.random.default_rng(1)
+        cells = rng.uniform(0.0, 0.5, size=16).astype("float32")
+        bare = sentinel2.encode_rows(cells, sentinel2.encode)  # a 1-D chunk: the bare codestream
+
+        actual = sentinel2.decode_rows(bare, shape, sentinel2.decode)
+
+        assert actual.shape == shape
+        assert_equal(actual.reshape(-1), sentinel2.decode_rows(bare, (16,), sentinel2.decode))
+
+    @pytest.mark.parametrize("shape", [(1, 16), (1, 1, 16)])
+    def test_single_row_framed_form_is_still_read(self, shape):
+        rng = np.random.default_rng(2)
+        cells = rng.uniform(0.0, 0.5, size=shape).astype("float32")
+        data = sentinel2.encode_rows(cells, sentinel2.encode)  # 8-byte length, then the codestream
+        assert len(data) == 8 + len(sentinel2.encode(cells.reshape(-1)))
+
+        actual = sentinel2.decode_rows(data, shape, sentinel2.decode)
+
+        assert_equal(actual, sentinel2.dequantize(sentinel2.quantize(cells)))
+
+    def test_single_row_both_forms_give_the_same_values(self):
+        cells = np.linspace(0.0, 0.5, 16, dtype="float32")
+        bare = sentinel2.encode(cells)
+        framed = np.array([len(bare)], dtype="<u8").tobytes() + bare
+
+        assert_equal(
+            sentinel2.decode_rows(bare, (1, 16), sentinel2.decode),
+            sentinel2.decode_rows(framed, (1, 16), sentinel2.decode),
+        )
+
+    def test_several_rows_are_still_strict_about_the_header(self):
+        cells = np.linspace(0.0, 0.5, 16, dtype="float32")
+        bare = sentinel2.encode(cells)  # no header: not a 2-row chunk
+
+        with pytest.raises(ValueError):
+            sentinel2.decode_rows(bare, (2, 16), sentinel2.decode)
+
     @pytest.mark.parametrize(
         "cut", [slice(0, 10), slice(0, -1)], ids=["truncated-header", "truncated-rows"]
     )
