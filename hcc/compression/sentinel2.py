@@ -177,9 +177,9 @@ def decode_rows(
     A chunk with a single row (``math.prod(shape[:-1]) == 1``, e.g. ``(1, 4**delta)``) is also read when
     it is the bare codestream of a 1-D chunk: this is how an array with a leading axis of length 1
     (a time or pass axis of chunk size 1) reads the chunk objects of a 1-D array without copying them.
-    The framed form (8-byte row length, then the codestream) is tried first; the bare codestream is
-    taken only when the header does not fit the data, which a codestream cannot do by accident (it
-    starts with a JPEG XL signature, read as a length it is far larger than the chunk).
+    The framed form (8-byte row length, then the codestream) is tried first; otherwise the entire
+    input is passed to the row decoder. For the supported JPEG XL and HS2P formats, the first
+    eight bytes of a bare stream do not match the framed row length.
     """
     if len(shape) == 1:
         return decode_row(data)
