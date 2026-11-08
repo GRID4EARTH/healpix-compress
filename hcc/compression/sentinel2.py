@@ -146,6 +146,11 @@ def encode_rows(
     return lengths.tobytes() + b"".join(streams)
 
 
+def _framed_single_row(data: bytes) -> bool:
+    """True when ``data`` is one row in the framed form: ``<u8`` length, then exactly that many bytes."""
+    return len(data) >= 8 and 8 + int(np.frombuffer(data[:8], dtype="<u8")[0]) == len(data)
+
+
 def decode_rows(
     data: bytes,
     shape: tuple[int, ...],
@@ -166,10 +171,21 @@ def decode_rows(
     -------
     numpy.ndarray
         The chunk, of shape *shape*.
+
+    Notes
+    -----
+    A chunk with a single row (``math.prod(shape[:-1]) == 1``, e.g. ``(1, 4**delta)``) is also read when
+    it is the bare codestream of a 1-D chunk: this is how an array with a leading axis of length 1
+    (a time or pass axis of chunk size 1) reads the chunk objects of a 1-D array without copying them.
+    The framed form (8-byte row length, then the codestream) is tried first; otherwise the entire
+    input is passed to the row decoder. For the supported JPEG XL and HS2P formats, the first
+    eight bytes of a bare stream do not match the framed row length.
     """
     if len(shape) == 1:
         return decode_row(data)
     n_rows = math.prod(shape[:-1])
+    if n_rows == 1 and not _framed_single_row(data):
+        return decode_row(data).reshape(shape)
     header = 8 * n_rows
     if len(data) < header:
         raise ValueError(f"truncated chunk: {len(data)} bytes for {n_rows} rows")

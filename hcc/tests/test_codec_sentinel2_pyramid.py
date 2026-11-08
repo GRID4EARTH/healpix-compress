@@ -156,6 +156,42 @@ class TestHccSentinel2PyramidCodec:
 
         assert actual == sentinel2_pyramid.encode(data, effort=1)
 
+    def test_one_dimensional_chunks_read_through_a_leading_axis(self):
+        """An array ``(T, n)`` with chunks ``(1, n)`` reads the chunk objects of 1-D arrays as they are
+        (a mosaic whose chunks are references to the objects of 1-D stores; one chunk per time or pass)."""
+        rng = np.random.default_rng(3)
+        rows = (0.2 + 0.05 * rng.standard_normal((2, 4**4))).astype("float32")
+        codec = codec_module.HccSentinel2PyramidCodec(relative_step=0.5, effort=1)
+        objects, expected = [], []
+        for row in rows:
+            with zarr.storage.MemoryStore() as store:
+                g = zarr.api.synchronous.create_group(store)
+                z = g.create_array(
+                    "z", data=row, chunks=(4**4,), serializer=codec, filters=None, compressors=None
+                )
+                objects.append(bytes(store._store_dict["z/c/0"].to_bytes()))
+                expected.append(z[:])
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                shape=(2, 4**4),
+                chunks=(1, 4**4),
+                dtype="float32",
+                fill_value=np.nan,
+                serializer=codec,
+                filters=None,
+                compressors=None,
+            )
+            for t, raw in enumerate(objects):  # the 1-D chunk objects, byte for byte
+                store._store_dict[f"z/c/{t}/0"] = zarr.core.buffer.default_buffer_prototype().buffer.from_bytes(raw)
+
+            actual = z[:]
+
+        assert actual.shape == (2, 4**4)
+        assert_equal(actual, np.stack(expected))
+
     @pytest.mark.parametrize(
         ["dtype", "chunks", "expectation"],
         [
