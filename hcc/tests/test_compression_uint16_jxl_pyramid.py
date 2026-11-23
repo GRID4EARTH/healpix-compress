@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_equal
 
-from hcc.compression import sentinel2_pyramid as pyramid
+from hcc.compression import uint16_jxl
+from hcc.compression import uint16_jxl_pyramid as pyramid
 from hcc.compression.zorder import flatten_tile
 
 pytest.importorskip("imagecodecs")
@@ -76,8 +77,8 @@ class TestEncodeDecode:
 
         # the base is exact; the decoded children do not have to average to it,
         # but they stay within half a step of the cells, around exact parents
-        expected = pyramid.sentinel2.dequantize(
-            pyramid.sentinel2.quantize(means), dtype="float64"
+        expected = pyramid.uint16_jxl.dequantize(
+            pyramid.uint16_jxl.quantize(means), dtype="float64"
         )
         assert (
             np.abs(actual.mean(axis=1) - expected).max()
@@ -119,7 +120,9 @@ class TestEncodeDecode:
             ),
             pytest.param({"effort": 0}, pytest.raises(ValueError), id="effort-too-low"),
             pytest.param(
-                {"decoding_speed": 5}, pytest.raises(ValueError), id="decoding-speed-too-high"
+                {"decoding_speed": 5},
+                pytest.raises(ValueError),
+                id="decoding-speed-too-high",
             ),
         ],
     )
@@ -153,3 +156,43 @@ class TestStreamInfo:
     def test_rejects_other_streams(self):
         with pytest.raises(ValueError):
             pyramid.stream_info(b"\x00" * 64)
+
+
+class TestOutOfRange:
+    def test_cells_in_range_do_not_warn(self, recwarn):
+        pyramid.encode(_field(3))
+
+        assert not [w for w in recwarn if w.category is uint16_jxl.OutOfRangeWarning]
+
+    def test_children_outside_with_parents_inside_do_not_warn(self, recwarn):
+        # the base holds the parent means; the children are coded as a detail
+        cells = np.full(4**2, 0.1)
+        cells[:4] = [-0.15, 0.35, 0.1, 0.1]
+
+        pyramid.encode(cells, relative_step=0)
+
+        assert not [w for w in recwarn if w.category is uint16_jxl.OutOfRangeWarning]
+
+    def test_parents_outside_warn(self):
+        cells = np.full(4**2, 0.1)
+        cells[:4] = 8.0
+
+        with pytest.warns(
+            uint16_jxl.OutOfRangeWarning, match="1 of 4 finite parent means"
+        ):
+            pyramid.encode(cells)
+
+    def test_raise(self):
+        cells = np.full(4**2, 0.1)
+        cells[4:8] = -1.0
+
+        with pytest.raises(ValueError, match="parent means"):
+            pyramid.encode(cells, out_of_range="raise")
+
+    def test_clip_is_silent(self, recwarn):
+        cells = np.full(4**2, 0.1)
+        cells[4:8] = -1.0
+
+        pyramid.encode(cells, out_of_range="clip")
+
+        assert not [w for w in recwarn if w.category is uint16_jxl.OutOfRangeWarning]

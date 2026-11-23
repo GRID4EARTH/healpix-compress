@@ -33,17 +33,21 @@ healpix-compress registers these codecs with zarr (entry point group
      - ``wavelets``
      - Quantises the residual of ``hcc-decompose`` per wavelet subband; the
        approximation subband stays lossless (lossy).
-   * - ``hcc-sentinel2``
+   * - ``hcc-uint16-jxl``
      - serializer
      - ``jpegxl``
      - Rounds the values to 16-bit integers with a scale and an offset and
        stores them with lossless JPEG XL; the rounding is the only error.
-   * - ``hcc-sentinel2-pyramid``
+   * - ``hcc-uint16-jxl-pyramid``
      - serializer
      - ``jpegxl``
      - Keeps the parent level lossless on the 16-bit integer lattice and
        quantises the children predicted from it, with a step that follows the
        chunk (``relative_step``; ``0`` is lossless).
+
+Up to 0.4.x the two serializers were ``hcc-sentinel2`` and
+``hcc-sentinel2-pyramid``; those ids stay registered, so stores written with
+them open unchanged.
 
 Presets
 -------
@@ -59,9 +63,9 @@ Presets
      - ``low``, ``medium``, ``high``, ``ultra``
    * - ``hcc-grad-dwt``
      - ``low``, ``medium``, ``high``, ``ultra``
-   * - ``hcc-sentinel2``
-     - ``lossless``
-   * - ``hcc-sentinel2-pyramid``
+   * - ``hcc-uint16-jxl``
+     - ``lossless``, ``reflectance``
+   * - ``hcc-uint16-jxl-pyramid``
      - ``default``, ``transfer-floor``, ``lossless``
 
 .. code-block:: python

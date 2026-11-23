@@ -1,4 +1,4 @@
-//! Kernels of the two-layer Sentinel-2 coding (`hcc.compression.sentinel2_pyramid`).
+//! Kernels of the two-layer 16-bit coding (`hcc.compression.uint16_jxl_pyramid`).
 //!
 //! The Python module is the reference: every floating-point result here is meant
 //! to be bit-identical to it, so each operation follows the order numpy and
@@ -404,7 +404,7 @@ impl Encoder {
                     // axis first, then the two partial sums
                     let sum = 0.0 + ((f(x00) + f(x01)) + (f(x10) + f(x11)));
                     let mean = sum / cnt as f64;
-                    // sentinel2.quantize
+                    // uint16_jxl.quantize
                     let scaled = (mean * q - o).round_ties_even();
                     base_dn[a * h + c] = scaled.clamp(1.0, u16::MAX as f64) as u16;
                 }

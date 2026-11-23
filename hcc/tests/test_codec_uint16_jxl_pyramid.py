@@ -1,0 +1,243 @@
+from contextlib import nullcontext
+
+import numpy as np
+import pytest
+import zarr
+from numpy.testing import assert_equal
+
+from hcc.codecs import uint16_jxl_pyramid as codec_module
+from hcc.compression import uint16_jxl_pyramid
+
+pytest.importorskip("imagecodecs")
+
+
+class TestHccUint16JxlPyramidCodec:
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({}, id="defaults"),
+            pytest.param({"relative_step": 0.0, "min_step": 2.0}, id="fixed-step"),
+            pytest.param({"predictor_size": 3, "effort": 3}, id="small-predictor"),
+            pytest.param({"decoding_speed": 0}, id="decoding-speed-0"),
+            pytest.param({"decoding_speed": 4}, id="decoding-speed-4"),
+            pytest.param({"out_of_range": "clip"}, id="out-of-range"),
+        ],
+    )
+    def test_serialization_roundtrip(self, kwargs):
+        codec = codec_module.HccUint16JxlPyramidCodec(**kwargs)
+
+        actual = codec_module.HccUint16JxlPyramidCodec.from_dict(codec.to_dict())
+
+        assert actual == codec
+
+    def test_default_decoding_speed_is_not_written(self):
+        # keeps the metadata of the default readable by earlier versions
+        configuration = codec_module.HccUint16JxlPyramidCodec().to_dict()[
+            "configuration"
+        ]
+
+        assert "decoding_speed" not in configuration
+        assert "out_of_range" not in configuration
+
+    def test_default_relative_step(self):
+        actual = codec_module.HccUint16JxlPyramidCodec().relative_step
+
+        assert actual == uint16_jxl_pyramid.DEFAULT_RELATIVE_STEP == 0.57
+
+    @pytest.mark.parametrize(
+        ["name", "expected"],
+        [
+            pytest.param("hcc-uint16-jxl", "hcc-uint16-jxl", id="lossless"),
+            pytest.param(
+                "hcc-uint16-jxl-pyramid", "hcc-uint16-jxl-pyramid", id="pyramid"
+            ),
+        ],
+    )
+    def test_write_and_reopen_by_name(self, name, expected):
+        """The serializers resolve by name alone, as zarr does when it opens a store."""
+        data = np.linspace(0.1, 0.4, 2 * 4**4, dtype="float32")
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.create_group(store, zarr_format=3)
+            g.create_array(
+                "b04",
+                data=data,
+                chunks=(4**4,),
+                fill_value=np.nan,
+                serializer={"name": name},
+                filters=None,
+                compressors=None,
+            )
+            reopened = zarr.open_group(store, mode="r")["b04"]
+            actual = reopened.metadata.to_dict()["codecs"][0]["name"]
+            values = reopened[:]
+
+        assert actual == expected
+        # a quarter of a DN for the lattice, half a step at most for the pyramid detail
+        assert np.abs(values - data).max() < 5e-3
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_zarr_roundtrip(self, dtype):
+        rng = np.random.default_rng(0)
+        data = (0.2 + 0.05 * rng.standard_normal(3 * 4**4)).astype(dtype)
+        data[7] = np.nan
+        codec = codec_module.HccUint16JxlPyramidCodec(relative_step=0.5, effort=1)
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                data=data,
+                chunks=(4**4,),
+                fill_value=np.nan,
+                serializer=codec,
+                filters=None,
+                compressors=None,
+            )
+            z[:] = data
+
+            actual = z[:]
+
+        expected = np.concatenate(
+            [
+                uint16_jxl_pyramid.decode(
+                    uint16_jxl_pyramid.encode(
+                        data[i : i + 4**4], relative_step=0.5, effort=1
+                    ),
+                    dtype=dtype,
+                )
+                for i in range(0, data.size, 4**4)
+            ]
+        )
+        assert actual.dtype == data.dtype
+        assert_equal(actual, expected)
+
+    def test_zarr_roundtrip_leading_axes(self):
+        rng = np.random.default_rng(0)
+        data = (0.2 + 0.05 * rng.standard_normal((2, 3, 4**4))).astype("float32")
+        data[0, 1, 7] = np.nan
+        codec = codec_module.HccUint16JxlPyramidCodec(relative_step=0.5, effort=1)
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                data=data,
+                chunks=(1, 3, 4**4),
+                fill_value=np.nan,
+                serializer=codec,
+                filters=None,
+                compressors=None,
+            )
+
+            actual = z[:]
+
+        expected = np.stack(
+            [
+                uint16_jxl_pyramid.decode(
+                    uint16_jxl_pyramid.encode(row, relative_step=0.5, effort=1)
+                )
+                for row in data.reshape(-1, 4**4)
+            ]
+        ).reshape(data.shape)
+        assert_equal(actual, expected)
+
+    def test_one_dimensional_chunk_bytes_unchanged(self):
+        """1-D chunks keep the single-codestream format of existing stores."""
+        data = np.linspace(0.1, 0.4, 4**4, dtype="float32")
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            g.create_array(
+                "z",
+                data=data,
+                chunks=(4**4,),
+                serializer=codec_module.HccUint16JxlPyramidCodec(effort=1),
+                filters=None,
+                compressors=None,
+            )
+            actual = bytes(store._store_dict["z/c/0"].to_bytes())
+
+        assert actual == uint16_jxl_pyramid.encode(data, effort=1)
+
+    def test_one_dimensional_chunks_read_through_a_leading_axis(self):
+        """An array ``(T, n)`` with chunks ``(1, n)`` reads the chunk objects of 1-D arrays as they are
+        (a mosaic whose chunks are references to the objects of 1-D stores; one chunk per time or pass).
+        """
+        rng = np.random.default_rng(3)
+        rows = (0.2 + 0.05 * rng.standard_normal((2, 4**4))).astype("float32")
+        codec = codec_module.HccUint16JxlPyramidCodec(relative_step=0.5, effort=1)
+        objects, expected = [], []
+        for row in rows:
+            with zarr.storage.MemoryStore() as store:
+                g = zarr.api.synchronous.create_group(store)
+                z = g.create_array(
+                    "z",
+                    data=row,
+                    chunks=(4**4,),
+                    serializer=codec,
+                    filters=None,
+                    compressors=None,
+                )
+                objects.append(bytes(store._store_dict["z/c/0"].to_bytes()))
+                expected.append(z[:])
+
+        with zarr.storage.MemoryStore() as store:
+            g = zarr.api.synchronous.create_group(store)
+            z = g.create_array(
+                "z",
+                shape=(2, 4**4),
+                chunks=(1, 4**4),
+                dtype="float32",
+                fill_value=np.nan,
+                serializer=codec,
+                filters=None,
+                compressors=None,
+            )
+            for t, raw in enumerate(objects):  # the 1-D chunk objects, byte for byte
+                store._store_dict[f"z/c/{t}/0"] = (
+                    zarr.core.buffer.default_buffer_prototype().buffer.from_bytes(raw)
+                )
+
+            actual = z[:]
+
+        assert actual.shape == (2, 4**4)
+        assert_equal(actual, np.stack(expected))
+
+    @pytest.mark.parametrize(
+        ["dtype", "chunks", "expectation"],
+        [
+            pytest.param("float32", (16,), nullcontext(), id="valid"),
+            pytest.param("float32", (2, 16), nullcontext(), id="leading-axis"),
+            pytest.param(
+                "float32",
+                (2, 1),
+                pytest.raises(ValueError),
+                id="leading-axis-single-cell-rows",
+            ),
+            pytest.param(
+                "uint16", (16,), pytest.raises(ValueError), id="integer-dtype"
+            ),
+            pytest.param(
+                "float32", (1,), pytest.raises(ValueError), id="single-cell-chunks"
+            ),
+            pytest.param(
+                "float32",
+                (12,),
+                pytest.raises(ValueError),
+                id="chunk-not-power-of-four",
+            ),
+        ],
+    )
+    def test_validate(self, dtype, chunks, expectation):
+        with zarr.storage.MemoryStore() as store, expectation:
+            g = zarr.api.synchronous.create_group(store)
+            g.create_array(
+                "z",
+                shape=(2, 32)[2 - len(chunks) :],
+                dtype=dtype,
+                chunks=chunks,
+                serializer=codec_module.HccUint16JxlPyramidCodec(),
+                filters=None,
+                compressors=None,
+            )

@@ -11,9 +11,12 @@ from hcc.codecs import presets
         ("hcc-grad-dct", "high"),
         ("hcc-grad-dwt", "low"),
         ("hcc-grad-dwt", "ultra"),
+        ("hcc-uint16-jxl", "lossless"),
+        ("hcc-uint16-jxl", "reflectance"),
+        ("hcc-uint16-jxl-pyramid", "transfer-floor"),
+        ("hcc-uint16-jxl-pyramid", "lossless"),
         ("hcc-sentinel2", "lossless"),
         ("hcc-sentinel2-pyramid", "transfer-floor"),
-        ("hcc-sentinel2-pyramid", "lossless"),
     ),
 )
 def test_preset(codec, preset) -> None:

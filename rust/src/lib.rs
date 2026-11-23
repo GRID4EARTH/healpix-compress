@@ -1,4 +1,4 @@
-//! Native kernels of the `hcc-sentinel2-pyramid` codec of healpix-compress.
+//! Native kernels of the `hcc-uint16-jxl-pyramid` codec of healpix-compress.
 //!
 //! The JPEG XL and zlib streams stay with imagecodecs and zlib on the Python
 //! side; this module does the rest of `encode` and `decode` (z-order, parent

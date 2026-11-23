@@ -95,17 +95,19 @@ Zarr codec
    HccGradDwtCodec
    lookup_preset
 
-API Reference — sentinel2
-=========================
+API Reference — uint16_jxl
+==========================
 
-.. currentmodule:: hcc.compression.sentinel2
+.. currentmodule:: hcc.compression.uint16_jxl
 
-.. automodule:: hcc.compression.sentinel2
+.. automodule:: hcc.compression.uint16_jxl
    :no-members:
    :no-undoc-members:
 
 A nested chunk rounded to 16-bit integers with a scale and an offset,
-de-interleaved from Morton order and stored with lossless JPEG XL.
+de-interleaved from Morton order and stored with lossless JPEG XL. Up to
+0.4.x this module was ``hcc.compression.sentinel2`` (still importable,
+deprecated).
 
 .. autosummary::
    :toctree: generated/
@@ -113,6 +115,8 @@ de-interleaved from Morton order and stored with lossless JPEG XL.
 
    quantize
    dequantize
+   value_range
+   from_cf
    encode
    decode
    check_chunk_shape
@@ -123,24 +127,28 @@ de-interleaved from Morton order and stored with lossless JPEG XL.
 Zarr serializer
 ---------------
 
-.. currentmodule:: hcc.codecs.sentinel2
+.. currentmodule:: hcc.codecs.uint16_jxl
+
+The codec id is ``hcc-uint16-jxl``; ``hcc-sentinel2``, its id up to 0.4.x,
+stays registered so that existing stores open.
 
 .. autosummary::
    :toctree: generated/
 
-   HccSentinel2Codec
+   HccUint16JxlCodec
    lookup_preset
 
-API Reference — sentinel2_pyramid
-=================================
+API Reference — uint16_jxl_pyramid
+==================================
 
-.. currentmodule:: hcc.compression.sentinel2_pyramid
+.. currentmodule:: hcc.compression.uint16_jxl_pyramid
 
-.. automodule:: hcc.compression.sentinel2_pyramid
+.. automodule:: hcc.compression.uint16_jxl_pyramid
    :no-members:
    :no-undoc-members:
 
-A lossless parent level on the digital-number lattice and the children
+Up to 0.4.x this module was ``hcc.compression.sentinel2_pyramid`` (still
+importable, deprecated). A lossless parent level on the digital-number lattice and the children
 predicted from it, with a quantised detail whose step follows the chunk.
 
 .. autosummary::
@@ -154,10 +162,13 @@ predicted from it, with a quantised detail whose step follows the chunk.
 Zarr serializer
 ---------------
 
-.. currentmodule:: hcc.codecs.sentinel2_pyramid
+.. currentmodule:: hcc.codecs.uint16_jxl_pyramid
+
+The codec id is ``hcc-uint16-jxl-pyramid``; ``hcc-sentinel2-pyramid``, its id
+up to 0.4.x, stays registered so that existing stores open.
 
 .. autosummary::
    :toctree: generated/
 
-   HccSentinel2PyramidCodec
+   HccUint16JxlPyramidCodec
    lookup_preset

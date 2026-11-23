@@ -14,7 +14,7 @@ Some codecs need an extra package:
 
 ``jpegxl``
     `imagecodecs <https://github.com/cgohlke/imagecodecs>`_, for the lossless
-    JPEG XL serializers (``hcc-sentinel2`` and ``hcc-sentinel2-pyramid``).
+    JPEG XL serializers (``hcc-uint16-jxl`` and ``hcc-uint16-jxl-pyramid``).
 
 ``wavelets``
     `PyWavelets <https://pywavelets.readthedocs.io>`_, for ``hcc-grad-dwt``.

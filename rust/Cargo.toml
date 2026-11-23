@@ -3,7 +3,7 @@ name = "hcc-native"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Native kernels of the hcc-sentinel2-pyramid codec of healpix-compress"
+description = "Native kernels of the hcc-uint16-jxl-pyramid codec of healpix-compress"
 publish = false
 
 [lib]
