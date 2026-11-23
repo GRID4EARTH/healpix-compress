@@ -47,6 +47,16 @@ serializer = hcc.codecs.sentinel2_pyramid.HccSentinel2PyramidCodec(relative_step
 
 The JPEG XL layers are lossless, so `effort` and `decoding_speed` change the size and the speed of the chunks, not the decoded cells. On 10 m reflectance chunks at effort 7, the default `decoding_speed=2` makes the chunks about 3 % larger than `decoding_speed=0` (the only setting of earlier versions) for half the JPEG XL encoding and decoding times; `decoding_speed=1` keeps the size of `0` and saves about a third.
 
+#### Size on a Sentinel-2 L2A band
+
+Band B02 (490 nm, 10 m) of one whole Sentinel-2 L2A tile around Paris, France, at HEALPix level 20: 334.8 million cells of about 6.2 m. The cells lie in the level-7 cells 11175, 11181, 11184 to 11190, 11192 and 11193 (nested indexing, WGS84 ellipsoid). The array holds float64 bottom-of-atmosphere reflectances (digital numbers x 0.0001 - 0.1), in chunks of 262 144 cells (one level-11 cell each).
+
+| Storage | Size (MB) |
+|---|---|
+| float64 under `bytes` + `zstd` (level 0) | 1276 |
+| digital numbers (uint16) under `bytes` + `zstd` (level 0) | 428 |
+| `hcc-sentinel2-pyramid` with `relative_step=0.57` | 157 |
+
 #### Native kernels
 
 The optional package in [`rust/`](rust/) (`healpix-compress-native`, module `hcc_native`, Rust and pyo3) runs everything but the JPEG XL and zlib streams and the least-squares fit natively, without holding the GIL. It gives the same codestreams and the same decoded cells as the Python implementation, bit for bit; the codec uses it when it is installed, unless `HCC_NATIVE=0`. It is built with a Rust toolchain and maturin:
