@@ -90,6 +90,80 @@ def value_range(
     return (NODATA_DN + 1 + o) / q, (MAX_DN + o) / q
 
 
+def from_cf(
+    scale_factor: float,
+    add_offset: float = 0.0,
+    *,
+    dtype: npt.DTypeLike,
+    fill_value: int,
+) -> dict[str, float]:
+    """The scale and offset that hold CF-packed 16-bit integers exactly.
+
+    A CF variable stores packed integers :math:`p` and reads them as
+    :math:`x = p \\cdot \\mathrm{scale\\_factor} + \\mathrm{add\\_offset}`, with
+    ``_FillValue`` for no-data. This gives :math:`Q` and :math:`O` such that
+    every valid :math:`p` becomes :math:`DN = p + s` and the fill value falls
+    on the no-data number ``0`` or just outside the range:
+
+    .. math::
+
+        Q = \\frac{1}{\\mathrm{scale\\_factor}}, \\qquad
+        O = \\frac{\\mathrm{add\\_offset}}{\\mathrm{scale\\_factor}} - s,
+
+    with :math:`s = -p_\\mathrm{min}` when the fill value is the smallest
+    value of the type and :math:`s = 1 - p_\\mathrm{min}` when it is the
+    largest. The codec holds 65535 values besides no-data, so the fill value
+    must be one of these two ends.
+
+    Parameters
+    ----------
+    scale_factor : float
+        The CF ``scale_factor``, positive.
+    add_offset : float, default 0.0
+        The CF ``add_offset``.
+    dtype : dtype-like
+        The packed type, ``uint16`` or ``int16``.
+    fill_value : int
+        The packed ``_FillValue``: the smallest or the largest value of *dtype*.
+
+    Returns
+    -------
+    dict
+        ``quantification_value`` and ``add_offset``, to pass to the codecs or
+        to :func:`quantize`.
+
+    Examples
+    --------
+    >>> from_cf(0.0001, -0.1, dtype="uint16", fill_value=0)
+    {'quantification_value': 10000.0, 'add_offset': -1000.0}
+    >>> from_cf(0.0001, -0.1, dtype="uint16", fill_value=65535)
+    {'quantification_value': 10000.0, 'add_offset': -1001.0}
+    >>> from_cf(0.01, dtype="int16", fill_value=-32768)
+    {'quantification_value': 100.0, 'add_offset': -32768.0}
+    """
+    dtype = np.dtype(dtype)
+    if dtype not in (np.dtype(np.uint16), np.dtype(np.int16)):
+        raise TypeError(f"expected a uint16 or int16 packed type, got {dtype}")
+    scale_factor = float(scale_factor)
+    if not scale_factor > 0:
+        raise ValueError(f"scale_factor must be positive, got {scale_factor!r}")
+    info = np.iinfo(dtype)
+    if fill_value == info.min:
+        shift = -info.min
+    elif fill_value == info.max:
+        shift = 1 - info.min
+    else:
+        raise ValueError(
+            f"fill_value must be {info.min} or {info.max} for {dtype}, got {fill_value!r}: "
+            "the codec holds 65535 values besides no-data, so the packed fill value must "
+            "be one end of the type's range"
+        )
+    return {
+        "quantification_value": 1.0 / scale_factor,
+        "add_offset": float(add_offset) / scale_factor - shift,
+    }
+
+
 def check_out_of_range(policy: str) -> None:
     """Reject an unknown ``out_of_range`` policy.
 
@@ -242,6 +316,13 @@ def encode_rows(
     return lengths.tobytes() + b"".join(streams)
 
 
+def _framed_single_row(data: bytes) -> bool:
+    """True when ``data`` is one row in the framed form: ``<u8`` length, then exactly that many bytes."""
+    return len(data) >= 8 and 8 + int(np.frombuffer(data[:8], dtype="<u8")[0]) == len(
+        data
+    )
+
+
 def decode_rows(
     data: bytes,
     shape: tuple[int, ...],
@@ -262,10 +343,21 @@ def decode_rows(
     -------
     numpy.ndarray
         The chunk, of shape *shape*.
+
+    Notes
+    -----
+    A chunk with a single row (``math.prod(shape[:-1]) == 1``, e.g. ``(1, 4**delta)``) is also read when
+    it is the bare codestream of a 1-D chunk: this is how an array with a leading axis of length 1
+    (a time or pass axis of chunk size 1) reads the chunk objects of a 1-D array without copying them.
+    The framed form (8-byte row length, then the codestream) is tried first; otherwise the entire
+    input is passed to the row decoder. For the supported JPEG XL and HS2P formats, the first
+    eight bytes of a bare stream do not match the framed row length.
     """
     if len(shape) == 1:
         return decode_row(data)
     n_rows = math.prod(shape[:-1])
+    if n_rows == 1 and not _framed_single_row(data):
+        return decode_row(data).reshape(shape)
     header = 8 * n_rows
     if len(data) < header:
         raise ValueError(f"truncated chunk: {len(data)} bytes for {n_rows} rows")

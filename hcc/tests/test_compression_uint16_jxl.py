@@ -248,6 +248,51 @@ class TestRows:
 
         assert actual == uint16_jxl.encode(cells)
 
+    @pytest.mark.parametrize("shape", [(1, 16), (1, 1, 16)])
+    def test_single_row_reads_the_one_dimensional_codestream(self, shape):
+        rng = np.random.default_rng(1)
+        cells = rng.uniform(0.0, 0.5, size=16).astype("float32")
+        bare = uint16_jxl.encode_rows(
+            cells, uint16_jxl.encode
+        )  # a 1-D chunk: the bare codestream
+
+        actual = uint16_jxl.decode_rows(bare, shape, uint16_jxl.decode)
+
+        assert actual.shape == shape
+        assert_equal(
+            actual.reshape(-1), uint16_jxl.decode_rows(bare, (16,), uint16_jxl.decode)
+        )
+
+    @pytest.mark.parametrize("shape", [(1, 16), (1, 1, 16)])
+    def test_single_row_framed_form_is_still_read(self, shape):
+        rng = np.random.default_rng(2)
+        cells = rng.uniform(0.0, 0.5, size=shape).astype("float32")
+        data = uint16_jxl.encode_rows(
+            cells, uint16_jxl.encode
+        )  # 8-byte length, then the codestream
+        assert len(data) == 8 + len(uint16_jxl.encode(cells.reshape(-1)))
+
+        actual = uint16_jxl.decode_rows(data, shape, uint16_jxl.decode)
+
+        assert_equal(actual, uint16_jxl.dequantize(uint16_jxl.quantize(cells)))
+
+    def test_single_row_both_forms_give_the_same_values(self):
+        cells = np.linspace(0.0, 0.5, 16, dtype="float32")
+        bare = uint16_jxl.encode(cells)
+        framed = np.array([len(bare)], dtype="<u8").tobytes() + bare
+
+        assert_equal(
+            uint16_jxl.decode_rows(bare, (1, 16), uint16_jxl.decode),
+            uint16_jxl.decode_rows(framed, (1, 16), uint16_jxl.decode),
+        )
+
+    def test_several_rows_are_still_strict_about_the_header(self):
+        cells = np.linspace(0.0, 0.5, 16, dtype="float32")
+        bare = uint16_jxl.encode(cells)  # no header: not a 2-row chunk
+
+        with pytest.raises(ValueError):
+            uint16_jxl.decode_rows(bare, (2, 16), uint16_jxl.decode)
+
     @pytest.mark.parametrize(
         "cut", [slice(0, 10), slice(0, -1)], ids=["truncated-header", "truncated-rows"]
     )
@@ -257,3 +302,86 @@ class TestRows:
 
         with pytest.raises(ValueError):
             uint16_jxl.decode_rows(data[cut], (2, 16), uint16_jxl.decode)
+
+
+class TestFromCf:
+    @pytest.mark.parametrize(
+        ["dtype", "fill_value", "shift"],
+        [
+            pytest.param("uint16", 0, 0, id="uint16-fill-min"),
+            pytest.param("uint16", 65535, 1, id="uint16-fill-max"),
+            pytest.param("int16", -32768, 32768, id="int16-fill-min"),
+            pytest.param("int16", 32767, 32769, id="int16-fill-max"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ["scale_factor", "add_offset"],
+        [
+            pytest.param(0.0001, -0.1, id="reflectance"),
+            pytest.param(0.01, 0.0, id="centi"),
+            pytest.param(0.002, 273.15, id="kelvin"),
+            pytest.param(1.0, 0.0, id="unit"),
+        ],
+    )
+    def test_every_packed_value_is_kept(
+        self, dtype, fill_value, shift, scale_factor, add_offset, recwarn
+    ):
+        info = np.iinfo(dtype)
+        packed = np.arange(int(info.min), int(info.max) + 1, dtype="int64")
+        valid = packed != fill_value
+        values = np.where(valid, packed * scale_factor + add_offset, np.nan)
+
+        params = uint16_jxl.from_cf(
+            scale_factor, add_offset, dtype=dtype, fill_value=fill_value
+        )
+        dn = uint16_jxl.quantize(values, **params)
+
+        assert not [w for w in recwarn if w.category is uint16_jxl.OutOfRangeWarning]
+        assert_equal(dn[valid], (packed[valid] + shift).astype("uint16"))
+        assert_equal(dn[~valid], 0)
+        assert_allclose(
+            uint16_jxl.dequantize(dn, dtype="float64", **params)[valid],
+            values[valid],
+            rtol=1e-12,
+            atol=1e-12 * scale_factor,
+        )
+
+    def test_unsigned_with_fill_max_needs_the_shift(self):
+        """The plain ``add_offset / scale_factor`` sends the valid packed 0 to no-data."""
+        values = np.array([-0.1, 0.0, 6.4534])  # packed 0, 1000, 65534
+        naive = {"quantification_value": 10000.0, "add_offset": -1000.0}
+        with pytest.warns(uint16_jxl.OutOfRangeWarning):
+            uint16_jxl.quantize(values, **naive)
+
+        params = uint16_jxl.from_cf(0.0001, -0.1, dtype="uint16", fill_value=65535)
+        assert_equal(uint16_jxl.quantize(values, **params), [1, 1001, 65535])
+
+    @pytest.mark.parametrize(
+        ["kwargs", "error"],
+        [
+            pytest.param(
+                {"dtype": "uint16", "fill_value": 1}, ValueError, id="fill-inside"
+            ),
+            pytest.param(
+                {"dtype": "int16", "fill_value": -32767},
+                ValueError,
+                id="netcdf-default",
+            ),
+            pytest.param({"dtype": "uint8", "fill_value": 0}, TypeError, id="uint8"),
+            pytest.param({"dtype": "float32", "fill_value": 0}, TypeError, id="float"),
+            pytest.param(
+                {"dtype": "uint16", "fill_value": 0, "scale_factor": 0.0},
+                ValueError,
+                id="zero-scale",
+            ),
+            pytest.param(
+                {"dtype": "uint16", "fill_value": 0, "scale_factor": -0.01},
+                ValueError,
+                id="negative-scale",
+            ),
+        ],
+    )
+    def test_rejects(self, kwargs, error):
+        kwargs = {"scale_factor": 0.01, **kwargs}
+        with pytest.raises(error):
+            uint16_jxl.from_cf(**kwargs)

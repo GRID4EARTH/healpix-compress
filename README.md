@@ -48,7 +48,15 @@ serializer = hcc.codecs.uint16_jxl.HccUint16JxlCodec(
 )
 ```
 
-For packed integers `p` with a CF `scale_factor` and `add_offset`, `Q = 1 / scale_factor` and `O = add_offset / scale_factor`, plus `-32768` for a signed type; keep the packed no-data value out of the range, since `DN = 0` is the codec's own no-data.
+For packed integers `p` with a CF `scale_factor`, `add_offset` and `_FillValue`, `hcc.compression.uint16_jxl.from_cf` gives the `Q` and `O` that keep every valid `p` exactly (`DN = p + s`) and put the fill value on no-data: `Q = 1 / scale_factor` and `O = add_offset / scale_factor - s`, with `s = 0` for `uint16` with a fill value of `0`, `s = 1` for `uint16` with `65535`, `s = 32768` for `int16` with `-32768` and `s = 32769` for `int16` with `32767`. The codec holds 65535 values besides no-data, so the fill value must be one end of the type's range.
+
+```python
+from hcc.compression.uint16_jxl import from_cf
+
+params = from_cf(0.0001, -0.1, dtype="uint16", fill_value=65535)
+# {'quantification_value': 10000.0, 'add_offset': -1001.0}
+serializer = hcc.codecs.uint16_jxl.HccUint16JxlCodec(**params)
+```
 
 ### Two-layer variant: lossless parents, quantised children
 
@@ -60,9 +68,15 @@ serializer = hcc.codecs.uint16_jxl_pyramid.HccUint16JxlPyramidCodec(relative_ste
 
 The JPEG XL layers are lossless, so `effort` and `decoding_speed` change the size and the speed of the chunks, not the decoded cells. On 10 m reflectance chunks at effort 7, the default `decoding_speed=2` makes the chunks about 3 % larger than `decoding_speed=0` (the only setting of earlier versions) for half the JPEG XL encoding and decoding times; `decoding_speed=1` keeps the size of `0` and saves about a third.
 
-### Codec ids before 0.5.0
+#### Size on a Sentinel-2 L2A band
 
-Up to 0.4.x the two serializers had other ids, `hcc-sentinel2` and `hcc-sentinel2-pyramid`. Those ids stay registered: stores written with them open unchanged, and their `zarr.json` keeps the old id. The old modules `hcc.codecs.sentinel2*` and `hcc.compression.sentinel2*` still import, with a `DeprecationWarning`; new code should use `hcc.codecs.uint16_jxl` and `hcc.codecs.uint16_jxl_pyramid`.
+Band B02 (490 nm, 10 m) of one whole Sentinel-2 L2A tile around Paris, France, at HEALPix level 20: 334.8 million cells of about 6.2 m. The cells lie in the level-7 cells 11175, 11181, 11184 to 11190, 11192 and 11193 (nested indexing, WGS84 ellipsoid). The array holds float64 bottom-of-atmosphere reflectances (digital numbers x 0.0001 - 0.1), in chunks of 262 144 cells (one level-11 cell each).
+
+| Storage | Size (MB) |
+|---|---|
+| float64 under `bytes` + `zstd` (level 0) | 1276 |
+| digital numbers (uint16) under `bytes` + `zstd` (level 0) | 428 |
+| `hcc-uint16-jxl-pyramid` with `relative_step=0.57` | 157 |
 
 #### Native kernels
 
@@ -71,6 +85,10 @@ The optional package in [`rust/`](rust/) (`healpix-compress-native`, module `hcc
 ```bash
 pip install ./rust
 ```
+
+### Codec ids before 0.5.0
+
+Up to 0.4.x the two serializers had other ids, `hcc-sentinel2` and `hcc-sentinel2-pyramid`. Those ids stay registered: stores written with them open unchanged, and their `zarr.json` keeps the old id. The old modules `hcc.codecs.sentinel2*` and `hcc.compression.sentinel2*` still import, with a `DeprecationWarning`; new code should use `hcc.codecs.uint16_jxl` and `hcc.codecs.uint16_jxl_pyramid`.
 
 ## Wavelet residuals: `hcc-grad-dwt`
 

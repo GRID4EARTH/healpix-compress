@@ -56,8 +56,11 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints", "jupyter_execute"]
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "alabaster"  # pydata-sphinx-theme incompatible with Sphinx 9
-# To restore pydata: pip install "sphinx>=7,<9" then revert this line
+html_theme = "pydata_sphinx_theme"  # needs Sphinx < 9 (docs/requirements.txt)
+
+html_theme_options = {
+    "github_url": "https://github.com/GRID4EARTH/healpix-compress",
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

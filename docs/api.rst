@@ -1,3 +1,13 @@
+API Reference — hcc
+===================
+
+.. currentmodule:: hcc
+
+.. autosummary::
+   :toctree: generated/
+
+   preset
+
 API Reference — grad_dct
 ========================
 
@@ -49,15 +59,6 @@ Used internally by the encoder/decoder; exposed for testing and experimentation.
    upsample
    local_std
 
-Data
-----
-
-.. autosummary::
-   :toctree: generated/
-   :nosignatures:
-
-   QUALITY_PRESETS
-
 API Reference — grad_dwt
 ========================
 
@@ -103,9 +104,10 @@ API Reference — uint16_jxl
    :no-members:
    :no-undoc-members:
 
-Data stored as 16-bit integers with a scale and an offset, on a nested chunk:
-digital numbers, Morton de-interleaving, lossless JPEG XL. Up to 0.4.x this
-module was ``hcc.compression.sentinel2`` (still importable, deprecated).
+A nested chunk rounded to 16-bit integers with a scale and an offset,
+de-interleaved from Morton order and stored with lossless JPEG XL. Up to
+0.4.x this module was ``hcc.compression.sentinel2`` (still importable,
+deprecated).
 
 .. autosummary::
    :toctree: generated/
@@ -114,6 +116,7 @@ module was ``hcc.compression.sentinel2`` (still importable, deprecated).
    quantize
    dequantize
    value_range
+   from_cf
    encode
    decode
    check_chunk_shape

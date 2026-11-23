@@ -35,3 +35,7 @@ pixi.lock
 
 # rust build
 /rust/target/
+
+# docs
+docs/_build/
+docs/generated/

@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 def preset(codec: str, name: str) -> list[Codec]:
     """lookup codec presets and generate a codec pipeline
 
+    See :doc:`/codecs` for the codecs and their presets.
+
     Parameters
     ----------
     codec : str
@@ -20,11 +22,6 @@ def preset(codec: str, name: str) -> list[Codec]:
     -------
     codecs : list of codec
         The codec pipeline as a list of codecs.
-
-    See Also
-    --------
-    :doc:`codecs`
-        The codec documentation
     """
 
     match codec:
